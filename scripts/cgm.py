@@ -282,6 +282,143 @@ def get_current_glucose():
     return {"error": "No data available"}
 
 
+def show_heatmap(days=90):
+    """Display a colored terminal heatmap of time-in-range by day and hour."""
+    if not DB_PATH.exists():
+        print("No database found. Run 'refresh' command first.")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    rows = conn.execute(
+        "SELECT sgv, date_string FROM readings WHERE date_ms >= ? AND sgv > 0",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+
+    by_day_hour = defaultdict(list)
+    for sgv, ds in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            by_day_hour[(dt.weekday(), dt.hour)].append(sgv)
+        except (ValueError, TypeError):
+            pass
+
+    days_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    t = get_thresholds()
+
+    # ANSI colors
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    ORANGE = '\033[38;5;208m'
+    RED = '\033[91m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+
+    def tir_block(values):
+        if not values:
+            return ' '
+        tir = sum(1 for v in values if t["target_low"] <= v <= t["target_high"]) / len(values) * 100
+        if tir >= 90:
+            return f'{GREEN}█{RESET}'
+        if tir >= 80:
+            return f'{YELLOW}█{RESET}'
+        if tir >= 70:
+            return f'{ORANGE}█{RESET}'
+        return f'{RED}█{RESET}'
+
+    print()
+    print(f'  {BOLD}Time-in-Range Heatmap ({days} days){RESET}')
+    print(f'  {GREEN}█{RESET} >90%  {YELLOW}█{RESET} 80-90%  {ORANGE}█{RESET} 70-80%  {RED}█{RESET} <70%')
+    print()
+    print('       0  2  4  6  8 10 12 14 16 18 20 22')
+    print('      ' + '─' * 48)
+
+    for d in range(7):
+        row = ''
+        for h in range(24):
+            row += tir_block(by_day_hour.get((d, h), [])) + ' '
+        print(f'  {days_names[d]} │{row}│')
+
+    print('      ' + '─' * 48)
+    print('       12am     6am      12pm     6pm      12am')
+    print()
+
+
+def show_day_chart(day_name, days=90):
+    """Display a colored bar chart for a specific day."""
+    if not DB_PATH.exists():
+        print("No database found. Run 'refresh' command first.")
+        return
+
+    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    day_idx = day_names.index(day_name.lower()) if day_name.lower() in day_names else None
+    if day_idx is None:
+        print(f"Invalid day: {day_name}")
+        return
+
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    rows = conn.execute(
+        "SELECT sgv, date_string FROM readings WHERE date_ms >= ? AND sgv > 0",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+
+    hourly = defaultdict(list)
+    for sgv, ds in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            if dt.weekday() == day_idx:
+                hourly[dt.hour].append(sgv)
+        except (ValueError, TypeError):
+            pass
+
+    t = get_thresholds()
+    
+    # ANSI colors
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    RESET = '\033[0m'
+    BOLD = '\033[1m'
+
+    print()
+    print(f'  {BOLD}{day_name.capitalize()} Glucose by Hour ({days} days){RESET}')
+    print('  ' + '─' * 50)
+    print()
+
+    for h in range(24):
+        values = hourly.get(h, [])
+        if not values:
+            continue
+        avg = sum(values) / len(values)
+        
+        # Color based on average
+        if avg < t["target_low"]:
+            color = RED
+        elif avg > t["target_high"]:
+            color = YELLOW
+        else:
+            color = GREEN
+        
+        # Bar length (scale 50-200 to 0-30 chars)
+        bar_len = max(0, min(30, int((avg - 50) / 150 * 30)))
+        bar = '█' * bar_len
+        
+        status = '✓' if t["target_low"] <= avg <= t["target_high"] else '!'
+        converted = convert_glucose(round(avg))
+        print(f'  {h:02d}:00 │{color}{bar:<30}{RESET}│ {converted} {status}')
+
+    print()
+    print(f'  Target: {convert_glucose(t["target_low"])}-{convert_glucose(t["target_high"])} {get_unit_label()}')
+    print()
+
+
 def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
     """
     Query CGM data with flexible filters for pattern analysis.
@@ -556,6 +693,23 @@ def main():
         help="Number of days to analyze (default: 90)"
     )
 
+    # Chart commands - visual terminal output
+    chart_parser = subparsers.add_parser(
+        "chart", help="Show visual charts in terminal (heatmap or day chart)"
+    )
+    chart_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to analyze (default: 90)"
+    )
+    chart_parser.add_argument(
+        "--heatmap", action="store_true",
+        help="Show weekly time-in-range heatmap"
+    )
+    chart_parser.add_argument(
+        "--day", type=str,
+        help="Show hourly chart for specific day (e.g., Saturday)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -576,6 +730,14 @@ def main():
         )
     elif args.command == "patterns":
         result = find_patterns(args.days)
+    elif args.command == "chart":
+        if args.heatmap:
+            show_heatmap(args.days)
+        elif args.day:
+            show_day_chart(args.day, args.days)
+        else:
+            show_heatmap(args.days)  # Default to heatmap
+        sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)
