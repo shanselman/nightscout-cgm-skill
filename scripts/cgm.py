@@ -282,6 +282,110 @@ def get_current_glucose():
     return {"error": "No data available"}
 
 
+def make_sparkline(values, min_val=40, max_val=400):
+    """
+    Create a sparkline string from a list of glucose values.
+    Uses Unicode block characters: ▁▂▃▄▅▆▇█
+    """
+    if not values:
+        return ""
+    
+    blocks = " ▁▂▃▄▅▆▇█"
+    
+    sparkline = []
+    for v in values:
+        # Clamp value to range
+        v = max(min_val, min(max_val, v))
+        # Normalize to 0-8 range (9 characters including space)
+        normalized = (v - min_val) / (max_val - min_val)
+        idx = int(normalized * 8)
+        idx = max(0, min(8, idx))
+        sparkline.append(blocks[idx])
+    
+    return "".join(sparkline)
+
+
+def show_sparkline(hours=24, use_color=True):
+    """
+    Display a sparkline of recent glucose readings.
+    Shows one character per reading (typically every 5 minutes).
+    """
+    if not DB_PATH.exists():
+        print("No database found. Run 'refresh' command first.")
+        return
+    
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    
+    rows = conn.execute(
+        "SELECT sgv, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+    
+    if not rows:
+        print("No data found for the requested period.")
+        return
+    
+    values = [r[0] for r in rows]
+    t = get_thresholds()
+    
+    # Calculate stats
+    avg = sum(values) / len(values)
+    min_v = min(values)
+    max_v = max(values)
+    in_range = sum(1 for v in values if t["target_low"] <= v <= t["target_high"])
+    tir = (in_range / len(values)) * 100
+    
+    # Get time range
+    first_dt = datetime.fromisoformat(rows[0][1].replace("Z", "+00:00"))
+    last_dt = datetime.fromisoformat(rows[-1][1].replace("Z", "+00:00"))
+    
+    # Create colored sparkline if requested
+    if use_color:
+        GREEN = '\033[92m'
+        YELLOW = '\033[93m'
+        RED = '\033[91m'
+        RESET = '\033[0m'
+        BOLD = '\033[1m'
+        
+        blocks = " ▁▂▃▄▅▆▇█"
+        sparkline = []
+        for v in values:
+            # Determine color based on range
+            if v < t["urgent_low"]:
+                color = RED  # Urgent low
+            elif v < t["target_low"]:
+                color = YELLOW  # Low
+            elif v <= t["target_high"]:
+                color = GREEN  # In range
+            elif v <= t["urgent_high"]:
+                color = YELLOW  # High
+            else:
+                color = RED  # Urgent high
+            
+            # Normalize to block character
+            clamped = max(40, min(400, v))
+            normalized = (clamped - 40) / 360
+            idx = int(normalized * 8)
+            idx = max(0, min(8, idx))
+            sparkline.append(f"{color}{blocks[idx]}{RESET}")
+        
+        spark_str = "".join(sparkline)
+        print(f"\n{BOLD}Glucose Sparkline ({hours}h){RESET}")
+        print(f"  {first_dt.strftime('%H:%M')} {spark_str} {last_dt.strftime('%H:%M')}")
+        print(f"\n  {GREEN}█{RESET} In Range  {YELLOW}█{RESET} Low/High  {RED}█{RESET} Urgent")
+    else:
+        # ASCII mode - no colors
+        spark_str = make_sparkline(values)
+        print(f"\nGlucose Sparkline ({hours}h)")
+        print(f"  {first_dt.strftime('%H:%M')} {spark_str} {last_dt.strftime('%H:%M')}")
+    
+    print(f"\n  Readings: {len(values)} | Avg: {convert_glucose(avg)} | Range: {convert_glucose(min_v)}-{convert_glucose(max_v)} | TIR: {tir:.0f}%")
+    print()
+
+
 def show_heatmap(days=90, use_color=True):
     """Display a terminal heatmap of time-in-range by day and hour."""
     if not DB_PATH.exists():
@@ -770,7 +874,7 @@ def main():
 
     # Chart commands - visual terminal output
     chart_parser = subparsers.add_parser(
-        "chart", help="Show visual charts in terminal (heatmap or day chart)"
+        "chart", help="Show visual charts in terminal (heatmap, day chart, or sparkline)"
     )
     chart_parser.add_argument(
         "--days", type=int, default=90,
@@ -783,6 +887,14 @@ def main():
     chart_parser.add_argument(
         "--day", type=str,
         help="Show hourly chart for specific day (e.g., Saturday)"
+    )
+    chart_parser.add_argument(
+        "--sparkline", action="store_true",
+        help="Show compact sparkline of recent readings"
+    )
+    chart_parser.add_argument(
+        "--hours", type=int, default=24,
+        help="Hours of data for sparkline (default: 24)"
     )
     chart_parser.add_argument(
         "--color", action="store_true",
@@ -811,7 +923,9 @@ def main():
         result = find_patterns(args.days)
     elif args.command == "chart":
         use_color = args.color
-        if args.heatmap:
+        if args.sparkline:
+            show_sparkline(args.hours, use_color=use_color)
+        elif args.heatmap:
             show_heatmap(args.days, use_color=use_color)
         elif args.day:
             show_day_chart(args.day, args.days, use_color=use_color)

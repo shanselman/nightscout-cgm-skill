@@ -57,6 +57,15 @@ python scripts/cgm.py query --day Sunday --hour-start 22 --hour-end 6
 # Morning analysis across all days
 python scripts/cgm.py query --hour-start 6 --hour-end 10
 
+# Show sparkline of last 24 hours (compact visual trend)
+python scripts/cgm.py chart --sparkline --hours 24
+
+# Show heatmap of time-in-range by day/hour
+python scripts/cgm.py chart --heatmap
+
+# Show hourly breakdown for a specific day
+python scripts/cgm.py chart --day Saturday
+
 # Refresh data from Nightscout
 python scripts/cgm.py refresh
 ```
@@ -74,6 +83,9 @@ With the pattern analysis capabilities, you can ask natural questions like:
 - "When do I tend to go low?"
 - "What day of the week is my best for time-in-range?"
 - "Show me my morning patterns"
+- "Show me a sparkline of my last 24 hours"
+- "Show me a heatmap of my glucose"
+- "What does Saturday look like?"
 
 ## Output Interpretation
 
