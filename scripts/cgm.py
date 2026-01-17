@@ -282,6 +282,225 @@ def get_current_glucose():
     return {"error": "No data available"}
 
 
+def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
+    """
+    Query CGM data with flexible filters for pattern analysis.
+    
+    Args:
+        days: Number of days to analyze
+        day_of_week: Filter by day (0=Monday, 6=Sunday, or name like "Tuesday")
+        hour_start: Start hour (0-23) for time window
+        hour_end: End hour (0-23) for time window
+    """
+    if not DB_PATH.exists():
+        return {"error": "No database found. Run 'refresh' command first."}
+
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {"error": "No data found. Run 'refresh' command first."}
+
+    # Parse day_of_week if it's a string name
+    day_names = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    if isinstance(day_of_week, str):
+        day_lower = day_of_week.lower()
+        if day_lower in day_names:
+            day_of_week = day_names.index(day_lower)
+
+    # Filter readings
+    filtered = []
+    for sgv, date_ms, ds in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            
+            # Filter by day of week
+            if day_of_week is not None and dt.weekday() != day_of_week:
+                continue
+            
+            # Filter by hour range
+            if hour_start is not None and hour_end is not None:
+                if hour_start <= hour_end:
+                    if not (hour_start <= dt.hour < hour_end):
+                        continue
+                else:  # Handles overnight ranges like 22-6
+                    if not (dt.hour >= hour_start or dt.hour < hour_end):
+                        continue
+            
+            filtered.append((sgv, dt))
+        except (ValueError, TypeError):
+            pass
+
+    if not filtered:
+        return {"error": "No readings match the specified filters."}
+
+    values = [r[0] for r in filtered]
+    stats = get_stats(values)
+    tir = get_time_in_range(values)
+
+    # Build filter description
+    filter_desc = []
+    if day_of_week is not None:
+        filter_desc.append(f"day={day_names[day_of_week].capitalize()}")
+    if hour_start is not None and hour_end is not None:
+        filter_desc.append(f"hours={hour_start:02d}:00-{hour_end:02d}:00")
+
+    # Hourly breakdown within filtered data
+    hourly = defaultdict(list)
+    for sgv, dt in filtered:
+        hourly[dt.hour].append(sgv)
+    hourly_avg = {h: convert_glucose(round(sum(v) / len(v), 0)) for h, v in sorted(hourly.items())}
+
+    # Day of week breakdown
+    daily = defaultdict(list)
+    for sgv, dt in filtered:
+        daily[day_names[dt.weekday()].capitalize()].append(sgv)
+    daily_avg = {d: convert_glucose(round(sum(v) / len(v), 0)) for d, v in daily.items()}
+
+    return {
+        "filter": " & ".join(filter_desc) if filter_desc else "none",
+        "days_analyzed": days,
+        "readings_matched": len(filtered),
+        "statistics": stats,
+        "time_in_range": tir,
+        "hourly_averages": hourly_avg,
+        "daily_averages": daily_avg,
+        "unit": get_unit_label()
+    }
+
+
+def find_patterns(days=90):
+    """
+    Automatically find interesting patterns in the data.
+    Identifies best/worst times, days, and trends.
+    """
+    if not DB_PATH.exists():
+        return {"error": "No database found. Run 'refresh' command first."}
+
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {"error": "No data found. Run 'refresh' command first."}
+
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Collect by hour and day
+    by_hour = defaultdict(list)
+    by_day = defaultdict(list)
+    by_day_hour = defaultdict(list)
+    
+    t = get_thresholds()
+    lows = []
+    highs = []
+    
+    for sgv, date_ms, ds in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            by_hour[dt.hour].append(sgv)
+            by_day[dt.weekday()].append(sgv)
+            by_day_hour[(dt.weekday(), dt.hour)].append(sgv)
+            
+            if sgv < t["target_low"]:
+                lows.append((sgv, dt))
+            elif sgv > t["target_high"]:
+                highs.append((sgv, dt))
+        except (ValueError, TypeError):
+            pass
+
+    # Find best/worst hours
+    hour_avgs = {h: sum(v)/len(v) for h, v in by_hour.items()}
+    hour_tir = {h: sum(1 for x in v if t["target_low"] <= x <= t["target_high"])/len(v)*100 
+                for h, v in by_hour.items()}
+    
+    best_hour = max(hour_tir, key=hour_tir.get)
+    worst_hour = min(hour_tir, key=hour_tir.get)
+    
+    # Find best/worst days
+    day_avgs = {d: sum(v)/len(v) for d, v in by_day.items()}
+    day_tir = {d: sum(1 for x in v if t["target_low"] <= x <= t["target_high"])/len(v)*100 
+               for d, v in by_day.items()}
+    
+    best_day = max(day_tir, key=day_tir.get)
+    worst_day = min(day_tir, key=day_tir.get)
+    
+    # Find problematic day+hour combinations
+    combo_tir = {}
+    for (d, h), values in by_day_hour.items():
+        if len(values) >= 10:  # Need enough data
+            tir_pct = sum(1 for x in values if t["target_low"] <= x <= t["target_high"])/len(values)*100
+            combo_tir[(d, h)] = tir_pct
+    
+    worst_combos = sorted(combo_tir.items(), key=lambda x: x[1])[:3]
+    best_combos = sorted(combo_tir.items(), key=lambda x: x[1], reverse=True)[:3]
+    
+    # Low patterns
+    low_hours = defaultdict(int)
+    low_days = defaultdict(int)
+    for sgv, dt in lows:
+        low_hours[dt.hour] += 1
+        low_days[dt.weekday()] += 1
+    
+    return {
+        "days_analyzed": days,
+        "total_readings": len(rows),
+        "insights": {
+            "best_time_of_day": {
+                "hour": f"{best_hour:02d}:00",
+                "time_in_range": round(hour_tir[best_hour], 1),
+                "avg_glucose": convert_glucose(round(hour_avgs[best_hour], 0))
+            },
+            "worst_time_of_day": {
+                "hour": f"{worst_hour:02d}:00",
+                "time_in_range": round(hour_tir[worst_hour], 1),
+                "avg_glucose": convert_glucose(round(hour_avgs[worst_hour], 0))
+            },
+            "best_day": {
+                "day": day_names[best_day],
+                "time_in_range": round(day_tir[best_day], 1),
+                "avg_glucose": convert_glucose(round(day_avgs[best_day], 0))
+            },
+            "worst_day": {
+                "day": day_names[worst_day],
+                "time_in_range": round(day_tir[worst_day], 1),
+                "avg_glucose": convert_glucose(round(day_avgs[worst_day], 0))
+            },
+            "problem_times": [
+                {
+                    "when": f"{day_names[d]} {h:02d}:00",
+                    "time_in_range": round(tir, 1)
+                } for (d, h), tir in worst_combos
+            ],
+            "best_times": [
+                {
+                    "when": f"{day_names[d]} {h:02d}:00",
+                    "time_in_range": round(tir, 1)
+                } for (d, h), tir in best_combos
+            ],
+            "low_events": {
+                "total": len(lows),
+                "most_common_hour": f"{max(low_hours, key=low_hours.get):02d}:00" if low_hours else "N/A",
+                "most_common_day": day_names[max(low_days, key=low_days.get)] if low_days else "N/A"
+            }
+        },
+        "unit": get_unit_label()
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Nightscout CGM data fetcher and analyzer"
@@ -307,6 +526,36 @@ def main():
         help="Days of data to fetch (default: 90)"
     )
 
+    # Query command - flexible pattern analysis
+    query_parser = subparsers.add_parser(
+        "query", help="Query data with filters (day of week, time range)"
+    )
+    query_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to analyze (default: 90)"
+    )
+    query_parser.add_argument(
+        "--day", type=str,
+        help="Day of week (e.g., Tuesday, or 0-6 where 0=Monday)"
+    )
+    query_parser.add_argument(
+        "--hour-start", type=int,
+        help="Start hour for time window (0-23)"
+    )
+    query_parser.add_argument(
+        "--hour-end", type=int,
+        help="End hour for time window (0-23)"
+    )
+
+    # Patterns command - automatic insight discovery
+    patterns_parser = subparsers.add_parser(
+        "patterns", help="Find interesting patterns (best/worst times, days, trends)"
+    )
+    patterns_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to analyze (default: 90)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -315,6 +564,18 @@ def main():
         result = analyze_cgm(args.days)
     elif args.command == "refresh":
         result = fetch_and_store(args.days)
+    elif args.command == "query":
+        day = args.day
+        if day and day.isdigit():
+            day = int(day)
+        result = query_patterns(
+            days=args.days,
+            day_of_week=day,
+            hour_start=args.hour_start,
+            hour_end=args.hour_end
+        )
+    elif args.command == "patterns":
+        result = find_patterns(args.days)
     else:
         parser.print_help()
         sys.exit(1)

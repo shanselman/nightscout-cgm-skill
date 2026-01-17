@@ -24,6 +24,16 @@ Where `<skill-path>` is the location where this skill is installed (e.g., `~/.co
 | `current` | Get the latest glucose reading |
 | `analyze [--days N]` | Analyze CGM data (default: 90 days) |
 | `refresh [--days N]` | Fetch latest data from Nightscout |
+| `patterns [--days N]` | Find interesting patterns (best/worst times, problem areas) |
+| `query [options]` | Query with filters (day of week, time range) |
+
+### Query Options
+
+The `query` command supports flexible filtering:
+- `--days N` - Number of days to analyze (default: 90)
+- `--day NAME` - Filter by day of week (e.g., Tuesday, or 0-6 where 0=Monday)
+- `--hour-start H` - Start hour for time window (0-23)
+- `--hour-end H` - End hour for time window (0-23)
 
 ### Examples
 
@@ -34,9 +44,36 @@ python scripts/cgm.py current
 # Analyze last 30 days
 python scripts/cgm.py analyze --days 30
 
+# Find patterns automatically (best/worst times, problem areas)
+python scripts/cgm.py patterns
+
+# What happens on Tuesdays after lunch?
+python scripts/cgm.py query --day Tuesday --hour-start 12 --hour-end 15
+
+# How are my overnight numbers on weekends?
+python scripts/cgm.py query --day Saturday --hour-start 22 --hour-end 6
+python scripts/cgm.py query --day Sunday --hour-start 22 --hour-end 6
+
+# Morning analysis across all days
+python scripts/cgm.py query --hour-start 6 --hour-end 10
+
 # Refresh data from Nightscout
 python scripts/cgm.py refresh
 ```
+
+## Example Questions You Can Ask
+
+With the pattern analysis capabilities, you can ask natural questions like:
+
+- "What's my current glucose?"
+- "Analyze my blood sugar for the last 30 days"
+- "What patterns do you see in my data?"
+- "What's happening on Tuesdays after lunch?"
+- "When are my worst times for blood sugar control?"
+- "How are my overnight numbers?"
+- "When do I tend to go low?"
+- "What day of the week is my best for time-in-range?"
+- "Show me my morning patterns"
 
 ## Output Interpretation
 
