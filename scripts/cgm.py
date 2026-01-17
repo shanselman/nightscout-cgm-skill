@@ -31,19 +31,38 @@ if not API_BASE:
     print("  export NIGHTSCOUT_URL='https://your-site.herokuapp.com/api/v1/entries.json'")
     sys.exit(1)
 
-# Unit configuration - set CGM_UNITS=mmol for mmol/L output
-USE_MMOL = os.environ.get("CGM_UNITS", "").lower() == "mmol"
-MGDL_TO_MMOL = 18.0182
+# Derive the API root from the entries URL
+API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
+
+# Unit configuration - fetched from Nightscout settings
+_cached_units = None
+
+def get_nightscout_units():
+    """Fetch the display units from Nightscout server settings."""
+    global _cached_units
+    if _cached_units is not None:
+        return _cached_units
+    
+    try:
+        resp = requests.get(f"{API_ROOT}/status.json", timeout=10)
+        resp.raise_for_status()
+        settings = resp.json().get("settings", {})
+        units = settings.get("units", "mg/dl")
+        _cached_units = units.lower().startswith("mmol")
+    except Exception:
+        _cached_units = False  # Default to mg/dL on error
+    
+    return _cached_units
 
 def convert_glucose(value_mgdl):
-    """Convert mg/dL to mmol/L if configured."""
-    if USE_MMOL:
-        return round(value_mgdl / MGDL_TO_MMOL, 1)
+    """Convert mg/dL to mmol/L if Nightscout is configured for mmol."""
+    if get_nightscout_units():
+        return round(value_mgdl / 18.0182, 1)
     return value_mgdl
 
 def get_unit_label():
-    """Get the appropriate unit label."""
-    return "mmol/L" if USE_MMOL else "mg/dL"
+    """Get the appropriate unit label based on Nightscout settings."""
+    return "mmol/L" if get_nightscout_units() else "mg/dL"
 SKILL_DIR = Path(__file__).parent.parent
 DB_PATH = SKILL_DIR / "cgm_data.db"
 
