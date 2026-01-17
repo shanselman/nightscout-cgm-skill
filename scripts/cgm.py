@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
-Nightscout CGM data fetcher and analyzer.
-Usage: python cgm.py <command> [options]
+Nightscout CGM Data Analyzer
 
-Commands:
-  current              Get the latest glucose reading
-  analyze [--days N]   Analyze CGM data (default: 90 days)
-  refresh [--days N]   Fetch latest data from Nightscout and update local database
+A command-line tool for fetching and analyzing Continuous Glucose Monitor (CGM) 
+data from Nightscout instances.
+
+Usage:
+    python cgm.py current              - Get the latest glucose reading
+    python cgm.py analyze [--days N]   - Analyze CGM data (default: 90 days)
+    python cgm.py refresh [--days N]   - Fetch data from Nightscout
+
+Environment Variables:
+    NIGHTSCOUT_URL - Required. Your Nightscout API endpoint URL
+                     Example: https://your-site.com/api/v1/entries.json
 """
 import argparse
 import json
@@ -34,6 +40,10 @@ if not API_BASE:
 # Derive the API root from the entries URL
 API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
 
+# Database configuration
+SKILL_DIR = Path(__file__).parent.parent
+DB_PATH = SKILL_DIR / "cgm_data.db"
+
 # Nightscout settings cache
 _cached_settings = None
 
@@ -60,6 +70,11 @@ SQL_CHECK_READING_EXISTS = "SELECT 1 FROM readings WHERE id = ?"
 SQL_INSERT_READING = "INSERT INTO readings VALUES (?,?,?,?,?,?,?)"
 SQL_COUNT_READINGS = "SELECT COUNT(*) FROM readings"
 SQL_SELECT_READINGS_BY_DATE = "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms"
+
+
+# ============================================================================
+# Nightscout Configuration Functions
+# ============================================================================
 
 def get_nightscout_settings():
     """Fetch settings from Nightscout server (cached).
@@ -127,9 +142,11 @@ def get_thresholds():
         "target_high": thresholds.get("bgTargetTop", DEFAULT_TARGET_HIGH),
         "high": thresholds.get("bgHigh", DEFAULT_HIGH),
     }
-SKILL_DIR = Path(__file__).parent.parent
-DB_PATH = SKILL_DIR / "cgm_data.db"
 
+
+# ============================================================================
+# Database Operations
+# ============================================================================
 
 def create_database():
     """Initialize SQLite database for storing CGM readings.
@@ -209,6 +226,10 @@ def fetch_and_store(days=90):
         "database": str(DB_PATH)
     }
 
+
+# ============================================================================
+# Analysis Functions
+# ============================================================================
 
 def get_stats(values):
     """Calculate basic statistics for glucose values.
@@ -354,6 +375,10 @@ def analyze_cgm(days=90):
     }
 
 
+# ============================================================================
+# Data Retrieval Functions
+# ============================================================================
+
 def get_current_glucose():
     """Get the most recent glucose reading from Nightscout.
     
@@ -383,6 +408,10 @@ def get_current_glucose():
         }
     return {"error": "No data available"}
 
+
+# ============================================================================
+# Command Line Interface
+# ============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
