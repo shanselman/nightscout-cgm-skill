@@ -37,6 +37,15 @@ API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
 # Nightscout settings cache
 _cached_settings = None
 
+# Constants for glucose thresholds and calculations
+DEFAULT_URGENT_LOW = 55
+DEFAULT_LOW = 70
+DEFAULT_TARGET_LOW = 70
+DEFAULT_TARGET_HIGH = 180
+DEFAULT_HIGH = 250
+CV_STABLE_THRESHOLD = 36
+MGDL_TO_MMOL_FACTOR = 18.0182
+
 def get_nightscout_settings():
     """Fetch settings from Nightscout server (cached)."""
     global _cached_settings
@@ -60,7 +69,7 @@ def use_mmol():
 def convert_glucose(value_mgdl):
     """Convert mg/dL to mmol/L if Nightscout is configured for mmol."""
     if use_mmol():
-        return round(value_mgdl / 18.0182, 1)
+        return round(value_mgdl / MGDL_TO_MMOL_FACTOR, 1)
     return value_mgdl
 
 def get_unit_label():
@@ -71,11 +80,11 @@ def get_thresholds():
     """Get glucose thresholds from Nightscout settings (in mg/dL)."""
     thresholds = get_nightscout_settings().get("thresholds", {})
     return {
-        "urgent_low": thresholds.get("bgLow", 55),
-        "low": 70,  # Standard low threshold
-        "target_low": thresholds.get("bgTargetBottom", 70),
-        "target_high": thresholds.get("bgTargetTop", 180),
-        "high": thresholds.get("bgHigh", 250),
+        "urgent_low": thresholds.get("bgLow", DEFAULT_URGENT_LOW),
+        "low": DEFAULT_LOW,  # Standard low threshold
+        "target_low": thresholds.get("bgTargetBottom", DEFAULT_TARGET_LOW),
+        "target_high": thresholds.get("bgTargetTop", DEFAULT_TARGET_HIGH),
+        "high": thresholds.get("bgHigh", DEFAULT_HIGH),
     }
 SKILL_DIR = Path(__file__).parent.parent
 DB_PATH = SKILL_DIR / "cgm_data.db"
@@ -116,6 +125,7 @@ def fetch_and_store(days=90):
             resp.raise_for_status()
             entries = resp.json()
         except requests.RequestException as e:
+            conn.close()
             return {"error": f"Failed to fetch data: {e}"}
 
         if not entries:
@@ -141,11 +151,10 @@ def fetch_and_store(days=90):
             break
         oldest_date = oldest - 1
 
-    conn.close()
-    
-    total_readings = sqlite3.connect(DB_PATH).execute(
+    total_readings = conn.execute(
         "SELECT COUNT(*) FROM readings"
     ).fetchone()[0]
+    conn.close()
     
     return {
         "status": "success",
@@ -170,7 +179,9 @@ def get_stats(values):
         "min": convert_glucose(values[0]),
         "max": convert_glucose(values[-1]),
         "median": convert_glucose(values[n // 2]),
-        "unit": get_unit_label()
+        "unit": get_unit_label(),
+        "raw_mean": mean,  # Keep raw mean for GMI calculation
+        "raw_std": std     # Keep raw std for CV calculation
     }
 
 
@@ -187,6 +198,29 @@ def get_time_in_range(values):
         "high_pct": round(sum(1 for v in values if t["target_high"] < v <= t["high"]) / n * 100, 1),
         "very_high_pct": round(sum(1 for v in values if v > t["high"]) / n * 100, 1),
     }
+
+
+def get_glucose_status(glucose_value):
+    """Determine glucose status based on thresholds.
+    
+    Args:
+        glucose_value: Glucose value in mg/dL
+    
+    Returns:
+        Status string describing the glucose level
+    """
+    t = get_thresholds()
+    
+    if glucose_value < t["urgent_low"]:
+        return "VERY LOW - urgent"
+    elif glucose_value < t["target_low"]:
+        return "low"
+    elif glucose_value <= t["target_high"]:
+        return "in range"
+    elif glucose_value <= t["high"]:
+        return "high"
+    else:
+        return "VERY HIGH"
 
 
 def analyze_cgm(days=90):
@@ -212,12 +246,12 @@ def analyze_cgm(days=90):
     tir = get_time_in_range(values)
 
     # GMI (Glucose Management Indicator) - estimated A1C
-    # Uses raw mg/dL mean, not converted value
-    raw_mean = sum(values) / len(values)
+    # Uses raw mg/dL mean from stats
+    raw_mean = stats.get("raw_mean", 0)
     gmi = round(3.31 + (0.02392 * raw_mean), 1)
     
-    # Coefficient of Variation (uses raw values)
-    raw_std = (sum((x - raw_mean) ** 2 for x in values) / len(values)) ** 0.5
+    # Coefficient of Variation (uses raw values from stats)
+    raw_std = stats.get("raw_std", 0)
     cv = round((raw_std / raw_mean) * 100, 1) if raw_mean else 0
 
     # Hourly breakdown
@@ -231,6 +265,9 @@ def analyze_cgm(days=90):
 
     hourly_avg = {h: convert_glucose(round(sum(v) / len(v), 0)) for h, v in sorted(hourly.items())}
 
+    # Remove raw values from stats before returning
+    stats_output = {k: v for k, v in stats.items() if k not in ("raw_mean", "raw_std")}
+
     return {
         "date_range": {
             "from": rows[0][2][:10] if rows[0][2] else "unknown",
@@ -238,11 +275,11 @@ def analyze_cgm(days=90):
             "days_analyzed": days
         },
         "readings": len(values),
-        "statistics": stats,
+        "statistics": stats_output,
         "time_in_range": tir,
         "gmi_estimated_a1c": gmi,
         "cv_variability": cv,
-        "cv_status": "stable" if cv < 36 else "high variability",
+        "cv_status": "stable" if cv < CV_STABLE_THRESHOLD else "high variability",
         "hourly_averages": hourly_avg,
         "unit": get_unit_label()
     }
@@ -260,18 +297,7 @@ def get_current_glucose():
     if data:
         e = data[0]
         sgv = e.get("sgv", 0)
-        t = get_thresholds()
-        
-        if sgv < t["urgent_low"]:
-            status = "VERY LOW - urgent"
-        elif sgv < t["target_low"]:
-            status = "low"
-        elif sgv <= t["target_high"]:
-            status = "in range"
-        elif sgv <= t["high"]:
-            status = "high"
-        else:
-            status = "VERY HIGH"
+        status = get_glucose_status(sgv)
 
         return {
             "glucose": convert_glucose(sgv),
