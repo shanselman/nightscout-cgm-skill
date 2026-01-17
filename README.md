@@ -217,6 +217,9 @@ python scripts/cgm.py chart --sparkline
 # Show sparkline of last 6 hours
 python scripts/cgm.py chart --sparkline --hours 6
 
+# Show week view (one sparkline per day - great for terminals!)
+python scripts/cgm.py chart --week --days 14 --color
+
 # Show ASCII heatmap (works inside Copilot)
 python scripts/cgm.py chart --heatmap
 
@@ -226,6 +229,29 @@ python scripts/cgm.py chart --day Saturday --color
 # Refresh data from Nightscout
 python scripts/cgm.py refresh --days 90
 ```
+
+### Standalone Terminal Usage
+
+You don't need an AI agent to use this tool! The Python script works great on its own with colorful ANSI output:
+
+```bash
+cd ~/.copilot/skills/nightscout-cgm
+python scripts/cgm.py chart --week --days 7 --color
+```
+
+There's also a PowerShell script that generates a full report:
+
+```powershell
+cd ~/.copilot/skills/nightscout-cgm
+.\show-all-charts.ps1
+```
+
+This outputs:
+- 📈 14-day sparklines (one line per day)
+- 🗓️ Weekly heatmap
+- 📊 Hourly breakdown for each day of the week
+- 🔍 Pattern analysis (best/worst times)
+- 📋 Full statistics
 
 ## Output Examples
 
