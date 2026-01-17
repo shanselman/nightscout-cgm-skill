@@ -46,8 +46,27 @@ DEFAULT_HIGH = 250
 CV_STABLE_THRESHOLD = 36
 MGDL_TO_MMOL_FACTOR = 18.0182
 
+# SQL queries
+SQL_CREATE_READINGS_TABLE = '''CREATE TABLE IF NOT EXISTS readings (
+    id TEXT PRIMARY KEY,
+    sgv INTEGER,
+    date_ms INTEGER,
+    date_string TEXT,
+    trend INTEGER,
+    direction TEXT,
+    device TEXT
+)'''
+SQL_CHECK_READING_EXISTS = "SELECT 1 FROM readings WHERE id = ?"
+SQL_INSERT_READING = "INSERT INTO readings VALUES (?,?,?,?,?,?,?)"
+SQL_COUNT_READINGS = "SELECT COUNT(*) FROM readings"
+SQL_SELECT_READINGS_BY_DATE = "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms"
+
 def get_nightscout_settings():
-    """Fetch settings from Nightscout server (cached)."""
+    """Fetch settings from Nightscout server (cached).
+    
+    Returns:
+        Dictionary of Nightscout settings, or empty dict on error
+    """
     global _cached_settings
     if _cached_settings is not None:
         return _cached_settings
@@ -55,29 +74,51 @@ def get_nightscout_settings():
     try:
         resp = requests.get(f"{API_ROOT}/status.json", timeout=10)
         resp.raise_for_status()
-        _cached_settings = resp.json().get("settings", {})
-    except Exception:
+        data = resp.json()
+        _cached_settings = data.get("settings", {})
+    except (requests.RequestException, ValueError, KeyError):
+        # ValueError for JSON decode errors, KeyError for missing keys
         _cached_settings = {}
     
     return _cached_settings
 
 def use_mmol():
-    """Check if Nightscout is configured for mmol/L."""
+    """Check if Nightscout is configured for mmol/L.
+    
+    Returns:
+        True if units are mmol/L, False if mg/dL
+    """
     units = get_nightscout_settings().get("units", "mg/dl")
     return units.lower().startswith("mmol")
 
 def convert_glucose(value_mgdl):
-    """Convert mg/dL to mmol/L if Nightscout is configured for mmol."""
+    """Convert mg/dL to mmol/L if Nightscout is configured for mmol.
+    
+    Args:
+        value_mgdl: Glucose value in mg/dL
+    
+    Returns:
+        Glucose value in the configured units (mg/dL or mmol/L)
+    """
     if use_mmol():
         return round(value_mgdl / MGDL_TO_MMOL_FACTOR, 1)
     return value_mgdl
 
 def get_unit_label():
-    """Get the appropriate unit label based on Nightscout settings."""
+    """Get the appropriate unit label based on Nightscout settings.
+    
+    Returns:
+        "mmol/L" or "mg/dL" based on Nightscout configuration
+    """
     return "mmol/L" if use_mmol() else "mg/dL"
 
 def get_thresholds():
-    """Get glucose thresholds from Nightscout settings (in mg/dL)."""
+    """Get glucose thresholds from Nightscout settings (in mg/dL).
+    
+    Returns:
+        Dictionary with threshold values: urgent_low, low, target_low, 
+        target_high, and high (all in mg/dL)
+    """
     thresholds = get_nightscout_settings().get("thresholds", {})
     return {
         "urgent_low": thresholds.get("bgLow", DEFAULT_URGENT_LOW),
@@ -91,23 +132,27 @@ DB_PATH = SKILL_DIR / "cgm_data.db"
 
 
 def create_database():
-    """Initialize SQLite database for storing CGM readings."""
+    """Initialize SQLite database for storing CGM readings.
+    
+    Returns:
+        Database connection object
+    """
     conn = sqlite3.connect(DB_PATH)
-    conn.execute('''CREATE TABLE IF NOT EXISTS readings (
-        id TEXT PRIMARY KEY,
-        sgv INTEGER,
-        date_ms INTEGER,
-        date_string TEXT,
-        trend INTEGER,
-        direction TEXT,
-        device TEXT
-    )''')
+    conn.execute(SQL_CREATE_READINGS_TABLE)
     conn.commit()
     return conn
 
 
 def fetch_and_store(days=90):
-    """Fetch CGM data from Nightscout and store in database."""
+    """Fetch CGM data from Nightscout and store in database.
+    
+    Args:
+        days: Number of days of historical data to fetch (default: 90)
+    
+    Returns:
+        Dictionary with status, new readings count, total readings, and database path,
+        or error dict if fetching fails
+    """
     conn = create_database()
     cutoff = datetime.utcnow() - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
@@ -124,7 +169,8 @@ def fetch_and_store(days=90):
             resp = requests.get(API_BASE, params=params, timeout=30)
             resp.raise_for_status()
             entries = resp.json()
-        except requests.RequestException as e:
+        except (requests.RequestException, ValueError) as e:
+            # ValueError for JSON decode errors
             conn.close()
             return {"error": f"Failed to fetch data: {e}"}
 
@@ -134,11 +180,11 @@ def fetch_and_store(days=90):
         for e in entries:
             if e.get("type") == "sgv":
                 cursor = conn.execute(
-                    "SELECT 1 FROM readings WHERE id = ?", (e.get("_id"),)
+                    SQL_CHECK_READING_EXISTS, (e.get("_id"),)
                 )
                 if not cursor.fetchone():
                     conn.execute(
-                        '''INSERT INTO readings VALUES (?,?,?,?,?,?,?)''',
+                        SQL_INSERT_READING,
                         (e.get("_id"), e.get("sgv"), e.get("date"),
                          e.get("dateString"), e.get("trend"),
                          e.get("direction"), e.get("device"))
@@ -152,7 +198,7 @@ def fetch_and_store(days=90):
         oldest_date = oldest - 1
 
     total_readings = conn.execute(
-        "SELECT COUNT(*) FROM readings"
+        SQL_COUNT_READINGS
     ).fetchone()[0]
     conn.close()
     
@@ -165,7 +211,15 @@ def fetch_and_store(days=90):
 
 
 def get_stats(values):
-    """Calculate basic statistics for glucose values."""
+    """Calculate basic statistics for glucose values.
+    
+    Args:
+        values: List of glucose values in mg/dL
+    
+    Returns:
+        Dictionary with count, mean, std, min, max, median (in configured units),
+        unit label, and raw mean/std (in mg/dL for further calculations)
+    """
     if not values:
         return {}
     values = sorted(values)
@@ -186,7 +240,14 @@ def get_stats(values):
 
 
 def get_time_in_range(values):
-    """Calculate time-in-range percentages using Nightscout thresholds."""
+    """Calculate time-in-range percentages using Nightscout thresholds.
+    
+    Args:
+        values: List of glucose values in mg/dL
+    
+    Returns:
+        Dictionary with percentages for each glucose range category
+    """
     if not values:
         return {}
     t = get_thresholds()
@@ -224,7 +285,15 @@ def get_glucose_status(glucose_value):
 
 
 def analyze_cgm(days=90):
-    """Analyze CGM data from database."""
+    """Analyze CGM data from database.
+    
+    Args:
+        days: Number of days to analyze (default: 90)
+    
+    Returns:
+        Dictionary containing analysis results including statistics, time in range,
+        GMI, CV, and hourly averages, or error dict if data is not available
+    """
     if not DB_PATH.exists():
         return {"error": "No database found. Run 'refresh' command first."}
 
@@ -233,7 +302,7 @@ def analyze_cgm(days=90):
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
-        "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        SQL_SELECT_READINGS_BY_DATE,
         (cutoff_ms,)
     ).fetchall()
     conn.close()
@@ -286,12 +355,18 @@ def analyze_cgm(days=90):
 
 
 def get_current_glucose():
-    """Get the most recent glucose reading from Nightscout."""
+    """Get the most recent glucose reading from Nightscout.
+    
+    Returns:
+        Dictionary with current glucose value, unit, trend, timestamp, and status,
+        or error dict if fetching fails
+    """
     try:
         resp = requests.get(API_BASE, params={"count": 1}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-    except requests.RequestException as e:
+    except (requests.RequestException, ValueError) as e:
+        # ValueError for JSON decode errors
         return {"error": f"Failed to fetch current glucose: {e}"}
 
     if data:
