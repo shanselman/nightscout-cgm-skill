@@ -227,7 +227,7 @@ python scripts/cgm.py refresh --days 90
 ### Analysis
 ```json
 {
-  "date_range": {"from": "2024-10-15", "to": "2024-01-15", "days_analyzed": 90},
+  "date_range": {"from": "2024-10-17", "to": "2025-01-15", "days_analyzed": 90},
   "readings": 25920,
   "statistics": {"count": 25920, "mean": 138.5, "std": 42.1, "min": 45, "max": 320, "median": 132},
   "time_in_range": {

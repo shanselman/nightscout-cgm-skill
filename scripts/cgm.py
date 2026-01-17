@@ -140,11 +140,9 @@ def fetch_and_store(days=90):
             break
         oldest_date = oldest - 1
 
+    # Get total count before closing connection
+    total_readings = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
     conn.close()
-    
-    total_readings = sqlite3.connect(DB_PATH).execute(
-        "SELECT COUNT(*) FROM readings"
-    ).fetchone()[0]
     
     return {
         "status": "success",
@@ -339,8 +337,12 @@ def show_sparkline(hours=24, use_color=True):
     tir = (in_range / len(values)) * 100
     
     # Get time range
-    first_dt = datetime.fromisoformat(rows[0][1].replace("Z", "+00:00"))
-    last_dt = datetime.fromisoformat(rows[-1][1].replace("Z", "+00:00"))
+    try:
+        first_dt = datetime.fromisoformat(rows[0][1].replace("Z", "+00:00"))
+        last_dt = datetime.fromisoformat(rows[-1][1].replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        print("Error: Invalid date format in database. Try running 'refresh' command.")
+        return
     
     # Create colored sparkline if requested
     if use_color:
@@ -863,11 +865,11 @@ def main():
         help="Day of week (e.g., Tuesday, or 0-6 where 0=Monday)"
     )
     query_parser.add_argument(
-        "--hour-start", type=int,
+        "--hour-start", type=int, choices=range(24), metavar="H",
         help="Start hour for time window (0-23)"
     )
     query_parser.add_argument(
-        "--hour-end", type=int,
+        "--hour-end", type=int, choices=range(24), metavar="H",
         help="End hour for time window (0-23)"
     )
 
