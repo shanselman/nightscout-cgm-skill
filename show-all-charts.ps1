@@ -11,17 +11,17 @@ Write-Host "══════════════════════�
 
 Write-Host "`n📈 SPARKLINE (Last 48 hours)" -ForegroundColor Yellow
 Write-Host "─────────────────────────────────────────────────────────────────"
-python $scriptPath chart --sparkline --hours 48
+python $scriptPath chart --sparkline --hours 48 --color
 
 Write-Host "`n🗓️  WEEKLY HEATMAP (Time-in-Range by Day/Hour)" -ForegroundColor Yellow
 Write-Host "─────────────────────────────────────────────────────────────────"
-python $scriptPath chart --heatmap --days 30
+python $scriptPath chart --heatmap --days 30 --color
 
 Write-Host "`n📊 DAILY BREAKDOWN" -ForegroundColor Yellow
 Write-Host "─────────────────────────────────────────────────────────────────"
 foreach ($day in @("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")) {
     Write-Host "`n--- $day ---" -ForegroundColor Green
-    python $scriptPath chart --day $day --days 30
+    python $scriptPath chart --day $day --days 30 --color
 }
 
 Write-Host "`n🔍 PATTERN ANALYSIS" -ForegroundColor Yellow
