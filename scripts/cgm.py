@@ -14,7 +14,7 @@ import os
 import sqlite3
 import sys
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 try:
@@ -99,7 +99,7 @@ def create_database():
 def fetch_and_store(days=90):
     """Fetch CGM data from Nightscout and store in database."""
     conn = create_database()
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     total_new = 0
@@ -194,7 +194,7 @@ def analyze_cgm(days=90):
         return {"error": "No database found. Run 'refresh' command first."}
 
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
@@ -315,7 +315,7 @@ def show_sparkline(hours=24, use_color=True):
         return
     
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
     cutoff_ms = int(cutoff.timestamp() * 1000)
     
     rows = conn.execute(
@@ -393,7 +393,7 @@ def show_heatmap(days=90, use_color=True):
         return
 
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
@@ -511,7 +511,7 @@ def show_day_chart(day_name, days=90, use_color=True):
         return
 
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
@@ -612,7 +612,7 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
         return {"error": "No database found. Run 'refresh' command first."}
 
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
@@ -701,7 +701,7 @@ def find_patterns(days=90):
         return {"error": "No database found. Run 'refresh' command first."}
 
     conn = sqlite3.connect(DB_PATH)
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
 
     rows = conn.execute(
