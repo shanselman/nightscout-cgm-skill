@@ -17,6 +17,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
+- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
 
@@ -255,6 +256,15 @@ python scripts/cgm.py chart --heatmap
 # Show day chart with colors (direct terminal)
 python scripts/cgm.py chart --day Saturday --color
 
+# Generate interactive HTML report (like tally for diabetes)
+python scripts/cgm.py report --days 90
+
+# Generate report and open in browser
+python scripts/cgm.py report --days 30 --open
+
+# Save report to specific location
+python scripts/cgm.py report --days 90 --output ~/my_glucose_report.html
+
 # Refresh data from Nightscout
 python scripts/cgm.py refresh --days 90
 ```
@@ -281,6 +291,29 @@ This outputs:
 - 📊 Hourly breakdown for each day of the week
 - 🔍 Pattern analysis (best/worst times)
 - 📋 Full statistics
+
+### Interactive HTML Report
+
+Generate a comprehensive, self-contained HTML report with interactive charts - similar to [tally](https://github.com/davidfowl/tally) but for diabetes data:
+
+```bash
+python scripts/cgm.py report --days 90 --open
+```
+
+The report includes:
+- 📊 **Time-in-Range pie chart** - Visual breakdown of glucose distribution
+- 📈 **Modal Day chart** - Your typical 24-hour glucose profile with percentile bands
+- 📅 **Daily trends** - Day-by-day average glucose and time-in-range
+- 🗓️ **Day of week comparison** - Which days are your best/worst
+- 📉 **Glucose distribution histogram** - See your glucose spread
+- 🔥 **Time-in-Range heatmap** - Identify problem times at a glance
+- 📆 **Weekly summary** - Track progress over weeks
+
+The report is:
+- **Self-contained** - Single HTML file with embedded Chart.js
+- **Privacy-first** - All data stays local, no external servers
+- **Interactive** - Hover for details, responsive design
+- **Shareable** - Open in any browser, send to your doctor
 
 ## Output Examples
 

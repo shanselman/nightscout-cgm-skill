@@ -1225,6 +1225,1043 @@ def find_worst_days(days=21, hour_start=None, hour_end=None, limit=5):
     }
 
 
+def generate_html_report(days=90, output_path=None):
+    """
+    Generate a comprehensive, self-contained HTML report with interactive charts.
+    Similar to tally's spending reports but for diabetes/CGM data.
+    
+    Args:
+        days: Number of days to include in the report
+        output_path: Path to save the HTML file (default: nightscout_report.html in skill dir)
+    
+    Returns:
+        Path to the generated HTML file, or error dict
+    """
+    if not ensure_data(days):
+        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+    
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string, direction FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+    
+    if not rows:
+        return {"error": "No data found for the specified period."}
+    
+    t = get_thresholds()
+    unit = get_unit_label()
+    is_mmol = use_mmol()
+    
+    # =========================================================================
+    # Data Processing for Charts
+    # =========================================================================
+    
+    # Basic statistics
+    all_values = [r[0] for r in rows]
+    raw_mean = sum(all_values) / len(all_values)
+    raw_std = (sum((x - raw_mean) ** 2 for x in all_values) / len(all_values)) ** 0.5
+    gmi = round(3.31 + (0.02392 * raw_mean), 1)
+    cv = round((raw_std / raw_mean) * 100, 1) if raw_mean else 0
+    
+    # Time in range calculation
+    very_low = sum(1 for v in all_values if v < t["urgent_low"])
+    low = sum(1 for v in all_values if t["urgent_low"] <= v < t["target_low"])
+    in_range = sum(1 for v in all_values if t["target_low"] <= v <= t["target_high"])
+    high = sum(1 for v in all_values if t["target_high"] < v <= t["urgent_high"])
+    very_high = sum(1 for v in all_values if v > t["urgent_high"])
+    total = len(all_values)
+    
+    tir_data = {
+        "very_low": round(very_low / total * 100, 1),
+        "low": round(low / total * 100, 1),
+        "in_range": round(in_range / total * 100, 1),
+        "high": round(high / total * 100, 1),
+        "very_high": round(very_high / total * 100, 1)
+    }
+    
+    # Hourly data for Modal Day chart (all days overlaid)
+    hourly_all = defaultdict(list)
+    for sgv, _, ds, _ in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            hourly_all[dt.hour].append(sgv)
+        except (ValueError, TypeError):
+            pass
+    
+    modal_day_data = []
+    for hour in range(24):
+        values = hourly_all.get(hour, [])
+        if values:
+            sorted_vals = sorted(values)
+            n = len(sorted_vals)
+            modal_day_data.append({
+                "hour": hour,
+                "mean": convert_glucose(round(sum(values) / n, 1)),
+                "median": convert_glucose(sorted_vals[n // 2]),
+                "p10": convert_glucose(sorted_vals[int(n * 0.1)]) if n > 10 else convert_glucose(sorted_vals[0]),
+                "p25": convert_glucose(sorted_vals[int(n * 0.25)]) if n > 4 else convert_glucose(sorted_vals[0]),
+                "p75": convert_glucose(sorted_vals[int(n * 0.75)]) if n > 4 else convert_glucose(sorted_vals[-1]),
+                "p90": convert_glucose(sorted_vals[int(n * 0.9)]) if n > 10 else convert_glucose(sorted_vals[-1]),
+                "min": convert_glucose(sorted_vals[0]),
+                "max": convert_glucose(sorted_vals[-1])
+            })
+        else:
+            modal_day_data.append({
+                "hour": hour, "mean": None, "median": None,
+                "p10": None, "p25": None, "p75": None, "p90": None,
+                "min": None, "max": None
+            })
+    
+    # Daily data for trend chart
+    daily_data = defaultdict(list)
+    for sgv, _, ds, _ in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            date_key = dt.strftime("%Y-%m-%d")
+            daily_data[date_key].append(sgv)
+        except (ValueError, TypeError):
+            pass
+    
+    daily_stats = []
+    for date_str in sorted(daily_data.keys()):
+        values = daily_data[date_str]
+        if values:
+            in_r = sum(1 for v in values if t["target_low"] <= v <= t["target_high"])
+            daily_stats.append({
+                "date": date_str,
+                "mean": convert_glucose(round(sum(values) / len(values), 1)),
+                "min": convert_glucose(min(values)),
+                "max": convert_glucose(max(values)),
+                "tir": round(in_r / len(values) * 100, 1),
+                "readings": len(values)
+            })
+    
+    # Day of week data
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    dow_data = defaultdict(list)
+    for sgv, _, ds, _ in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            dow_data[dt.weekday()].append(sgv)
+        except (ValueError, TypeError):
+            pass
+    
+    dow_stats = []
+    for day_idx in range(7):
+        values = dow_data.get(day_idx, [])
+        if values:
+            in_r = sum(1 for v in values if t["target_low"] <= v <= t["target_high"])
+            dow_stats.append({
+                "day": day_names[day_idx],
+                "mean": convert_glucose(round(sum(values) / len(values), 1)),
+                "tir": round(in_r / len(values) * 100, 1),
+                "readings": len(values)
+            })
+        else:
+            dow_stats.append({
+                "day": day_names[day_idx],
+                "mean": 0,
+                "tir": 0,
+                "readings": 0
+            })
+    
+    # Heatmap data (day x hour)
+    heatmap_data = defaultdict(lambda: defaultdict(list))
+    for sgv, _, ds, _ in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            heatmap_data[dt.weekday()][dt.hour].append(sgv)
+        except (ValueError, TypeError):
+            pass
+    
+    heatmap_tir = []
+    for day_idx in range(7):
+        day_row = []
+        for hour in range(24):
+            values = heatmap_data[day_idx].get(hour, [])
+            if values:
+                in_r = sum(1 for v in values if t["target_low"] <= v <= t["target_high"])
+                tir_pct = round(in_r / len(values) * 100, 1)
+            else:
+                tir_pct = None
+            day_row.append(tir_pct)
+        heatmap_tir.append(day_row)
+    
+    # Glucose distribution (histogram)
+    bin_size = 10 if not is_mmol else 1
+    min_bin = 40 if not is_mmol else 2
+    max_bin = 350 if not is_mmol else 20
+    
+    bins = defaultdict(int)
+    for v in all_values:
+        bin_start = (v // bin_size) * bin_size
+        bin_start = max(min_bin, min(max_bin, bin_start))
+        bins[bin_start] += 1
+    
+    histogram_data = []
+    for b in range(min_bin, max_bin + bin_size, bin_size):
+        histogram_data.append({
+            "bin": convert_glucose(b) if is_mmol else b,
+            "count": bins.get(b, 0)
+        })
+    
+    # Weekly summaries (for the period selector)
+    weekly_data = defaultdict(list)
+    for sgv, _, ds, _ in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            week_start = (dt - timedelta(days=dt.weekday())).strftime("%Y-%m-%d")
+            weekly_data[week_start].append(sgv)
+        except (ValueError, TypeError):
+            pass
+    
+    weekly_stats = []
+    for week_start in sorted(weekly_data.keys()):
+        values = weekly_data[week_start]
+        if values:
+            in_r = sum(1 for v in values if t["target_low"] <= v <= t["target_high"])
+            weekly_stats.append({
+                "week": week_start,
+                "mean": convert_glucose(round(sum(values) / len(values), 1)),
+                "tir": round(in_r / len(values) * 100, 1),
+                "readings": len(values)
+            })
+    
+    # Date range info
+    first_date = rows[0][2][:10] if rows[0][2] else "unknown"
+    last_date = rows[-1][2][:10] if rows[-1][2] else "unknown"
+    
+    # =========================================================================
+    # HTML Template with embedded Chart.js
+    # =========================================================================
+    
+    html_template = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nightscout CGM Report</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-card: #0f3460;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #e94560;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #3b82f6;
+            --in-range: #10b981;
+            --low: #f59e0b;
+            --high: #f59e0b;
+            --very-low: #ef4444;
+            --very-high: #ef4444;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            border-bottom: 1px solid var(--bg-card);
+            margin-bottom: 30px;
+        }
+        
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--accent), var(--info));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .stat-card .value {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .stat-card.tir .value { color: var(--in-range); }
+        .stat-card.gmi .value { color: var(--info); }
+        .stat-card.cv .value { color: var(--warning); }
+        
+        .chart-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-section h2 {
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .chart-section h2::before {
+            content: '';
+            display: inline-block;
+            width: 4px;
+            height: 24px;
+            background: var(--accent);
+            border-radius: 2px;
+        }
+        
+        .chart-container {
+            position: relative;
+            height: 350px;
+        }
+        
+        .chart-container.tall {
+            height: 450px;
+        }
+        
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 30px;
+        }
+        
+        .tir-breakdown {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+        
+        .tir-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .tir-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%%;
+        }
+        
+        .tir-dot.very-low { background: var(--very-low); }
+        .tir-dot.low { background: var(--low); }
+        .tir-dot.in-range { background: var(--in-range); }
+        .tir-dot.high { background: var(--high); }
+        .tir-dot.very-high { background: var(--very-high); }
+        
+        .heatmap-container {
+            overflow-x: auto;
+        }
+        
+        .heatmap {
+            display: grid;
+            grid-template-columns: 60px repeat(24, 1fr);
+            gap: 2px;
+            font-size: 0.75rem;
+        }
+        
+        .heatmap-cell {
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            min-width: 28px;
+        }
+        
+        .heatmap-header {
+            background: transparent;
+            color: var(--text-secondary);
+            font-weight: bold;
+        }
+        
+        .heatmap-label {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 8px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        
+        footer {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            border-top: 1px solid var(--bg-card);
+            margin-top: 30px;
+        }
+        
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        .disclaimer {
+            background: var(--bg-card);
+            border-left: 4px solid var(--warning);
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9rem;
+        }
+        
+        @media (max-width: 768px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+            
+            .chart-container {
+                height: 300px;
+            }
+            
+            header h1 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Nightscout CGM Report</h1>
+            <p class="subtitle">%(first_date)s to %(last_date)s (%(days)s days) • %(readings)s readings</p>
+        </header>
+        
+        <div class="disclaimer">
+            ⚠️ <strong>Not medical advice.</strong> This report is for informational purposes only. 
+            Always consult your healthcare provider for diabetes management decisions.
+        </div>
+        
+        <!-- Key Metrics -->
+        <div class="stats-grid">
+            <div class="stat-card tir">
+                <div class="value">%(tir_in_range).1f%%</div>
+                <div class="label">Time in Range (%(target_low)s-%(target_high)s %(unit)s)</div>
+            </div>
+            <div class="stat-card gmi">
+                <div class="value">%(gmi).1f%%</div>
+                <div class="label">GMI (Estimated A1C)</div>
+            </div>
+            <div class="stat-card cv">
+                <div class="value">%(cv).1f%%</div>
+                <div class="label">CV (%(cv_status)s)</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">%(mean)s</div>
+                <div class="label">Average Glucose (%(unit)s)</div>
+            </div>
+        </div>
+        
+        <!-- Time in Range Pie Chart -->
+        <div class="chart-section">
+            <h2>Time in Range Distribution</h2>
+            <div class="chart-container">
+                <canvas id="tirPieChart"></canvas>
+            </div>
+            <div class="tir-breakdown">
+                <div class="tir-item"><span class="tir-dot very-low"></span> Very Low (&lt;%(urgent_low)s): %(tir_very_low).1f%%</div>
+                <div class="tir-item"><span class="tir-dot low"></span> Low (%(urgent_low)s-%(target_low_minus)s): %(tir_low).1f%%</div>
+                <div class="tir-item"><span class="tir-dot in-range"></span> In Range (%(target_low)s-%(target_high)s): %(tir_in_range).1f%%</div>
+                <div class="tir-item"><span class="tir-dot high"></span> High (%(target_high_plus)s-%(urgent_high)s): %(tir_high).1f%%</div>
+                <div class="tir-item"><span class="tir-dot very-high"></span> Very High (&gt;%(urgent_high)s): %(tir_very_high).1f%%</div>
+            </div>
+        </div>
+        
+        <!-- Modal Day Chart -->
+        <div class="chart-section">
+            <h2>Modal Day (Typical 24-Hour Profile)</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.9rem;">
+                Shows your typical glucose pattern throughout the day. The shaded area represents the 10th-90th percentile range.
+            </p>
+            <div class="chart-container tall">
+                <canvas id="modalDayChart"></canvas>
+            </div>
+        </div>
+        
+        <div class="grid-2">
+            <!-- Daily Trend -->
+            <div class="chart-section">
+                <h2>Daily Average & Time in Range</h2>
+                <div class="chart-container">
+                    <canvas id="dailyTrendChart"></canvas>
+                </div>
+            </div>
+            
+            <!-- Day of Week -->
+            <div class="chart-section">
+                <h2>Day of Week Comparison</h2>
+                <div class="chart-container">
+                    <canvas id="dowChart"></canvas>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Glucose Distribution -->
+        <div class="chart-section">
+            <h2>Glucose Distribution</h2>
+            <div class="chart-container">
+                <canvas id="histogramChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- Heatmap -->
+        <div class="chart-section">
+            <h2>Time-in-Range Heatmap (Day × Hour)</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.9rem;">
+                Darker green = higher time in range. Red/orange = problem areas needing attention.
+            </p>
+            <div class="heatmap-container">
+                <div class="heatmap" id="heatmapGrid">
+                    <!-- Generated by JavaScript -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Weekly Summary -->
+        <div class="chart-section">
+            <h2>Weekly Summary</h2>
+            <div class="chart-container">
+                <canvas id="weeklyChart"></canvas>
+            </div>
+        </div>
+        
+        <footer>
+            Generated by <a href="https://github.com/shanselman/nightscout-cgm-skill">Nightscout CGM Skill</a> on %(generated_date)s
+            <br>
+            Data stays local. Your privacy is protected. 🔒
+        </footer>
+    </div>
+    
+    <script>
+        // Chart.js global defaults
+        Chart.defaults.color = '#aaa';
+        Chart.defaults.borderColor = 'rgba(255,255,255,0.1)';
+        
+        // Data from Python
+        const modalDayData = %(modal_day_json)s;
+        const dailyStats = %(daily_stats_json)s;
+        const dowStats = %(dow_stats_json)s;
+        const histogramData = %(histogram_json)s;
+        const heatmapTir = %(heatmap_json)s;
+        const weeklyStats = %(weekly_stats_json)s;
+        const tirData = %(tir_data_json)s;
+        const thresholds = {
+            urgentLow: %(urgent_low)s,
+            targetLow: %(target_low)s,
+            targetHigh: %(target_high)s,
+            urgentHigh: %(urgent_high)s
+        };
+        const unit = '%(unit)s';
+        
+        // Colors
+        const colors = {
+            veryLow: '#ef4444',
+            low: '#f59e0b',
+            inRange: '#10b981',
+            high: '#f59e0b',
+            veryHigh: '#ef4444',
+            accent: '#e94560',
+            info: '#3b82f6'
+        };
+        
+        // Time in Range Pie Chart
+        new Chart(document.getElementById('tirPieChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Very Low', 'Low', 'In Range', 'High', 'Very High'],
+                datasets: [{
+                    data: [tirData.very_low, tirData.low, tirData.in_range, tirData.high, tirData.very_high],
+                    backgroundColor: [colors.veryLow, colors.low, colors.inRange, colors.high, colors.veryHigh],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'right',
+                        labels: { padding: 20 }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => `${ctx.label}: ${ctx.parsed.toFixed(1)}%%`
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Modal Day Chart (with percentile bands)
+        const modalHours = modalDayData.map(d => d.hour + ':00');
+        const modalMean = modalDayData.map(d => d.mean);
+        const modalMedian = modalDayData.map(d => d.median);
+        const modalP10 = modalDayData.map(d => d.p10);
+        const modalP90 = modalDayData.map(d => d.p90);
+        const modalP25 = modalDayData.map(d => d.p25);
+        const modalP75 = modalDayData.map(d => d.p75);
+        
+        new Chart(document.getElementById('modalDayChart'), {
+            type: 'line',
+            data: {
+                labels: modalHours,
+                datasets: [
+                    {
+                        label: '90th Percentile',
+                        data: modalP90,
+                        borderColor: 'transparent',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: '+1',
+                        pointRadius: 0,
+                        order: 4
+                    },
+                    {
+                        label: '10th Percentile',
+                        data: modalP10,
+                        borderColor: 'transparent',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        pointRadius: 0,
+                        order: 5
+                    },
+                    {
+                        label: '75th Percentile',
+                        data: modalP75,
+                        borderColor: 'transparent',
+                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                        fill: '+1',
+                        pointRadius: 0,
+                        order: 2
+                    },
+                    {
+                        label: '25th Percentile',
+                        data: modalP25,
+                        borderColor: 'transparent',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        pointRadius: 0,
+                        order: 3
+                    },
+                    {
+                        label: 'Median',
+                        data: modalMedian,
+                        borderColor: colors.info,
+                        backgroundColor: colors.info,
+                        borderWidth: 3,
+                        fill: false,
+                        pointRadius: 2,
+                        tension: 0.3,
+                        order: 1
+                    },
+                    {
+                        label: 'Mean',
+                        data: modalMean,
+                        borderColor: colors.accent,
+                        backgroundColor: colors.accent,
+                        borderWidth: 2,
+                        borderDash: [5, 5],
+                        fill: false,
+                        pointRadius: 0,
+                        tension: 0.3,
+                        order: 0
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { 
+                        position: 'top',
+                        labels: { 
+                            filter: (item) => ['Median', 'Mean'].includes(item.text)
+                        }
+                    },
+                    annotation: {
+                        annotations: {
+                            targetLow: {
+                                type: 'line',
+                                yMin: thresholds.targetLow,
+                                yMax: thresholds.targetLow,
+                                borderColor: colors.inRange,
+                                borderWidth: 1,
+                                borderDash: [5, 5]
+                            },
+                            targetHigh: {
+                                type: 'line',
+                                yMin: thresholds.targetHigh,
+                                yMax: thresholds.targetHigh,
+                                borderColor: colors.inRange,
+                                borderWidth: 1,
+                                borderDash: [5, 5]
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        title: { display: true, text: unit },
+                        min: %(chart_min)s,
+                        max: %(chart_max)s
+                    }
+                }
+            }
+        });
+        
+        // Daily Trend Chart
+        new Chart(document.getElementById('dailyTrendChart'), {
+            type: 'bar',
+            data: {
+                labels: dailyStats.map(d => d.date.slice(5)),
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'Average',
+                        data: dailyStats.map(d => d.mean),
+                        borderColor: colors.accent,
+                        backgroundColor: colors.accent,
+                        borderWidth: 2,
+                        fill: false,
+                        yAxisID: 'y',
+                        pointRadius: 1,
+                        tension: 0.3,
+                        order: 0
+                    },
+                    {
+                        type: 'bar',
+                        label: 'TIR %%',
+                        data: dailyStats.map(d => d.tir),
+                        backgroundColor: dailyStats.map(d => 
+                            d.tir >= 70 ? colors.inRange : d.tir >= 50 ? colors.low : colors.veryLow
+                        ),
+                        yAxisID: 'y1',
+                        order: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: { mode: 'index', intersect: false },
+                plugins: {
+                    legend: { position: 'top' }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: unit }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        title: { display: true, text: 'TIR %%' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+        
+        // Day of Week Chart
+        new Chart(document.getElementById('dowChart'), {
+            type: 'bar',
+            data: {
+                labels: dowStats.map(d => d.day.slice(0, 3)),
+                datasets: [
+                    {
+                        label: 'Average Glucose',
+                        data: dowStats.map(d => d.mean),
+                        backgroundColor: colors.info,
+                        yAxisID: 'y'
+                    },
+                    {
+                        label: 'TIR %%',
+                        data: dowStats.map(d => d.tir),
+                        backgroundColor: dowStats.map(d => 
+                            d.tir >= 70 ? colors.inRange : d.tir >= 50 ? colors.low : colors.veryLow
+                        ),
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: unit }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        title: { display: true, text: 'TIR %%' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+        
+        // Histogram
+        new Chart(document.getElementById('histogramChart'), {
+            type: 'bar',
+            data: {
+                labels: histogramData.map(d => d.bin),
+                datasets: [{
+                    label: 'Readings',
+                    data: histogramData.map(d => d.count),
+                    backgroundColor: histogramData.map(d => {
+                        const v = d.bin;
+                        if (v < thresholds.urgentLow) return colors.veryLow;
+                        if (v < thresholds.targetLow) return colors.low;
+                        if (v <= thresholds.targetHigh) return colors.inRange;
+                        if (v <= thresholds.urgentHigh) return colors.high;
+                        return colors.veryHigh;
+                    })
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false }
+                },
+                scales: {
+                    x: { title: { display: true, text: unit } },
+                    y: { title: { display: true, text: 'Number of Readings' } }
+                }
+            }
+        });
+        
+        // Heatmap
+        const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        const heatmapGrid = document.getElementById('heatmapGrid');
+        
+        // Header row
+        const headerCell = document.createElement('div');
+        headerCell.className = 'heatmap-cell heatmap-header';
+        heatmapGrid.appendChild(headerCell);
+        
+        for (let h = 0; h < 24; h++) {
+            const cell = document.createElement('div');
+            cell.className = 'heatmap-cell heatmap-header';
+            cell.textContent = h;
+            heatmapGrid.appendChild(cell);
+        }
+        
+        // Data rows
+        for (let d = 0; d < 7; d++) {
+            const labelCell = document.createElement('div');
+            labelCell.className = 'heatmap-cell heatmap-label';
+            labelCell.textContent = dayNames[d];
+            heatmapGrid.appendChild(labelCell);
+            
+            for (let h = 0; h < 24; h++) {
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                const tir = heatmapTir[d][h];
+                
+                if (tir === null) {
+                    cell.style.background = 'rgba(255,255,255,0.05)';
+                    cell.title = `${dayNames[d]} ${h}:00 - No data`;
+                } else {
+                    // Color scale: red (0%%) -> yellow (50%%) -> green (100%%)
+                    let color;
+                    if (tir >= 80) {
+                        color = `rgba(16, 185, 129, ${0.3 + (tir - 80) / 100})`; // Green
+                    } else if (tir >= 60) {
+                        color = `rgba(245, 158, 11, ${0.5 + (tir - 60) / 100})`; // Yellow/Orange
+                    } else {
+                        color = `rgba(239, 68, 68, ${0.4 + (60 - tir) / 150})`; // Red
+                    }
+                    cell.style.background = color;
+                    cell.title = `${dayNames[d]} ${h}:00 - ${tir.toFixed(0)}%% TIR`;
+                }
+                
+                heatmapGrid.appendChild(cell);
+            }
+        }
+        
+        // Weekly Chart
+        new Chart(document.getElementById('weeklyChart'), {
+            type: 'bar',
+            data: {
+                labels: weeklyStats.map(d => 'Week of ' + d.week.slice(5)),
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'Average',
+                        data: weeklyStats.map(d => d.mean),
+                        borderColor: colors.accent,
+                        backgroundColor: colors.accent,
+                        borderWidth: 2,
+                        fill: false,
+                        yAxisID: 'y',
+                        pointRadius: 3,
+                        tension: 0.3
+                    },
+                    {
+                        type: 'bar',
+                        label: 'TIR %%',
+                        data: weeklyStats.map(d => d.tir),
+                        backgroundColor: weeklyStats.map(d => 
+                            d.tir >= 70 ? colors.inRange : d.tir >= 50 ? colors.low : colors.veryLow
+                        ),
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top' }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        position: 'left',
+                        title: { display: true, text: unit }
+                    },
+                    y1: {
+                        type: 'linear',
+                        position: 'right',
+                        min: 0,
+                        max: 100,
+                        title: { display: true, text: 'TIR %%' },
+                        grid: { drawOnChartArea: false }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+'''
+    
+    # Calculate chart bounds
+    if is_mmol:
+        chart_min = 2
+        chart_max = 20
+    else:
+        chart_min = 40
+        chart_max = 350
+    
+    # Format the HTML
+    html_content = html_template % {
+        "first_date": first_date,
+        "last_date": last_date,
+        "days": days,
+        "readings": len(rows),
+        "unit": unit,
+        "tir_in_range": tir_data["in_range"],
+        "tir_very_low": tir_data["very_low"],
+        "tir_low": tir_data["low"],
+        "tir_high": tir_data["high"],
+        "tir_very_high": tir_data["very_high"],
+        "gmi": gmi,
+        "cv": cv,
+        "cv_status": "stable" if cv < 36 else "variable",
+        "mean": convert_glucose(round(raw_mean, 1)),
+        "urgent_low": convert_glucose(t["urgent_low"]),
+        "target_low": convert_glucose(t["target_low"]),
+        "target_low_minus": convert_glucose(t["target_low"] - 1),
+        "target_high": convert_glucose(t["target_high"]),
+        "target_high_plus": convert_glucose(t["target_high"] + 1),
+        "urgent_high": convert_glucose(t["urgent_high"]),
+        "modal_day_json": json.dumps(modal_day_data),
+        "daily_stats_json": json.dumps(daily_stats),
+        "dow_stats_json": json.dumps(dow_stats),
+        "histogram_json": json.dumps(histogram_data),
+        "heatmap_json": json.dumps(heatmap_tir),
+        "weekly_stats_json": json.dumps(weekly_stats),
+        "tir_data_json": json.dumps(tir_data),
+        "chart_min": chart_min,
+        "chart_max": chart_max,
+        "generated_date": datetime.now().strftime("%Y-%m-%d %H:%M")
+    }
+    
+    # Determine output path
+    if output_path is None:
+        output_path = SKILL_DIR / "nightscout_report.html"
+    else:
+        output_path = Path(output_path)
+    
+    # Write the file
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    return {
+        "status": "success",
+        "report": str(output_path),
+        "days_analyzed": days,
+        "readings": len(rows),
+        "date_range": f"{first_date} to {last_date}"
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Nightscout CGM data fetcher and analyzer"
@@ -1363,6 +2400,23 @@ def main():
         help="Use ANSI colors (for direct terminal use, not inside Copilot)"
     )
 
+    # Report command - generate HTML report (like tally)
+    report_parser = subparsers.add_parser(
+        "report", help="Generate an interactive HTML report (like tally for diabetes)"
+    )
+    report_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to include in report (default: 90)"
+    )
+    report_parser.add_argument(
+        "--output", "-o", type=str,
+        help="Output file path (default: nightscout_report.html in skill directory)"
+    )
+    report_parser.add_argument(
+        "--open", action="store_true",
+        help="Open the report in default browser after generating"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -1415,6 +2469,20 @@ def main():
         else:
             show_heatmap(args.days, use_color=use_color)  # Default to heatmap
         sys.exit(0)
+    elif args.command == "report":
+        result = generate_html_report(
+            days=args.days,
+            output_path=args.output
+        )
+        if "error" not in result:
+            print(f"Report generated: {result['report']}")
+            print(f"  Period: {result['date_range']}")
+            print(f"  Readings: {result['readings']}")
+            
+            # Open in browser if requested
+            if args.open:
+                import webbrowser
+                webbrowser.open(f"file://{result['report']}")
     else:
         parser.print_help()
         sys.exit(1)
