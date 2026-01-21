@@ -2,6 +2,12 @@
 *.db
 cgm_data.db
 
+# Profile configuration (may contain personal URLs/tokens)
+profiles.json
+
+# Generated reports
+nightscout_report.html
+
 # Python
 __pycache__/
 *.py[cod]

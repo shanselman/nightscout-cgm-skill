@@ -11,6 +11,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 
 ## Features
 
+- **Multiple Profiles** - Track multiple people or switch between Nightscout instances with isolated databases
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
@@ -18,7 +19,6 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
-- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
 
@@ -104,6 +104,11 @@ python scripts/cgm.py chart --sparkline
 
 # Weekly heatmap
 python scripts/cgm.py chart --heatmap
+
+# Manage multiple profiles (NEW!)
+python scripts/cgm.py profile create kiddo --url "https://kiddo.nightscout.com/..."
+python scripts/cgm.py profile list
+python scripts/cgm.py profile switch kiddo
 ```
 
 ## Privacy & Data Architecture
@@ -199,6 +204,64 @@ $env:NIGHTSCOUT_URL = "https://your-nightscout-site.com/api/v1/entries.json?toke
 **Windows (persistent):**
 ```powershell
 [Environment]::SetEnvironmentVariable("NIGHTSCOUT_URL", "https://your-nightscout-site.com/api/v1/entries.json?token=YOUR_API_SECRET", "User")
+```
+
+## Multiple Profiles
+
+**New Feature:** Track multiple people or switch between different Nightscout instances with separate profiles.
+
+### Use Cases
+- **Family Tracking**: Parent monitoring multiple children's diabetes data
+- **Multiple Accounts**: Switch between personal and test instances
+- **Separate Databases**: Each profile maintains its own isolated database and settings
+
+### Profile Commands
+
+```bash
+# Create a new profile
+python scripts/cgm.py profile create kiddo --url "https://kiddo-nightscout.com/api/v1/entries.json?token=SECRET"
+
+# List all profiles (shows active profile marked with *)
+python scripts/cgm.py profile list
+
+# Switch to a different profile
+python scripts/cgm.py profile switch kiddo
+
+# Delete a profile (must not be active)
+python scripts/cgm.py profile delete kiddo
+```
+
+### How It Works
+
+- Each profile has its own:
+  - **Nightscout URL** - Point to different servers
+  - **SQLite Database** - Completely isolated data (`cgm_data_<profile>.db`)
+  - **Settings** - Profile-specific thresholds and preferences
+
+- The **default** profile uses the `NIGHTSCOUT_URL` environment variable
+- All existing commands work with the active profile
+- Switch profiles anytime - all data remains isolated
+
+### Example Workflow
+
+```bash
+# Set up profiles for multiple family members
+python scripts/cgm.py profile create kiddo --url "https://kiddo.nightscout.com/api/v1/entries.json?token=TOKEN1"
+python scripts/cgm.py profile create teen --url "https://teen.nightscout.com/api/v1/entries.json?token=TOKEN2"
+
+# Switch to kiddo's profile
+python scripts/cgm.py profile switch kiddo
+
+# All commands now use kiddo's data
+python scripts/cgm.py current
+python scripts/cgm.py analyze --days 30
+python scripts/cgm.py report --days 90 --open
+
+# Switch to teen's profile
+python scripts/cgm.py profile switch teen
+
+# Now working with teen's data
+python scripts/cgm.py current
 ```
 
 ## Getting Started
