@@ -12,13 +12,13 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **PDF Export** - One-click PDF generation for doctor visits and personal records
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
-- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
 
@@ -46,6 +46,29 @@ python scripts/cgm.py report --days 90 --open
   - Time-in-Range heatmap (day × hour) with hover tooltips
   - Weekly summary
 
+## PDF Export
+
+Generate print-ready PDF reports for doctor visits and personal records:
+
+```bash
+# Generate PDF report for your endocrinologist
+python scripts/cgm.py report --days 90 --pdf --output report.pdf
+
+# 30-day PDF report
+python scripts/cgm.py report --days 30 --pdf
+```
+
+**Perfect for:**
+- 📋 Doctor appointments (endocrinologist visits)
+- 📧 Emailing reports to healthcare providers
+- 📁 Archiving monthly records
+- 🖨️ Printing for your records
+
+PDF reports include:
+- All key statistics (Time-in-Range, GMI, CV, average glucose)
+- Clean, print-friendly formatting with date range and generation timestamp
+- Optimized for paper size and professional presentation
+
 ### Color Scheme
 
 Uses CGM-style colors (like Dexcom/Libre):
@@ -65,6 +88,7 @@ Just ask naturally:
 ```
 "What's my current glucose?"
 "Generate a report of my last 90 days"
+"Generate a PDF report for my doctor"
 "What patterns do you see in my data?"
 "What's happening on Tuesdays after lunch?"
 "When do I tend to go low?"
@@ -149,6 +173,7 @@ The skill simply runs a local Python script and returns text output. Your health
 - Python 3.8+
 - `requests` library (`pip install requests`)
 - A [Nightscout](http://www.nightscout.info/) instance with API access
+- `weasyprint` library for PDF generation (optional, `pip install weasyprint`)
 
 ## Installation
 
@@ -173,7 +198,11 @@ git clone https://github.com/shanselman/nightscout-cgm-skill .github/skills/nigh
 ### Install Dependencies
 
 ```bash
+# Required
 pip install requests
+
+# Optional: For PDF generation
+pip install weasyprint
 ```
 
 ## Configuration
@@ -311,6 +340,12 @@ python scripts/cgm.py report --days 30 --open
 
 # Save report to specific location
 python scripts/cgm.py report --days 90 --output ~/my_glucose_report.html
+
+# Generate PDF report for doctor visits
+python scripts/cgm.py report --days 90 --pdf --output report.pdf
+
+# Generate 30-day PDF report
+python scripts/cgm.py report --days 30 --pdf
 
 # Refresh data from Nightscout
 python scripts/cgm.py refresh --days 90
