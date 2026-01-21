@@ -274,10 +274,12 @@ def profile_switch(name):
     save_profiles(profiles)
     
     # Update global DB_PATH and API_BASE for immediate effect
-    global DB_PATH, API_BASE, API_ROOT
+    # Clear cached settings so they're refreshed for the new profile
+    global DB_PATH, API_BASE, API_ROOT, _cached_settings
     DB_PATH = get_db_path(name)
     API_BASE = get_api_base()
     API_ROOT = get_api_root()
+    _cached_settings = None  # Force refresh of Nightscout settings for new profile
     
     return {
         "status": "success",
