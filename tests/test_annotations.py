@@ -223,20 +223,16 @@ class TestListAnnotations:
     def test_filters_by_days(self, cgm_module, temp_db):
         """Should filter annotations by time range."""
         with patch.object(cgm_module, "DB_PATH", temp_db):
-            # Add recent and old annotations
+            # Add recent annotation
             cgm_module.add_annotation("1h ago", "lunch", "recent")
             
-            # Manually add an old annotation
-            conn = sqlite3.connect(temp_db)
+            # Mock parse_annotation_time to create an old annotation
+            from unittest.mock import MagicMock
             old_time = datetime.now(timezone.utc) - timedelta(days=10)
             old_ms = int(old_time.timestamp() * 1000)
-            created_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-            conn.execute(
-                'INSERT INTO annotations (timestamp_ms, tag, note, created_at) VALUES (?, ?, ?, ?)',
-                (old_ms, "lunch", "old", created_ms)
-            )
-            conn.commit()
-            conn.close()
+            
+            with patch.object(cgm_module, 'parse_annotation_time', return_value=old_ms):
+                cgm_module.add_annotation("10d ago", "lunch", "old")
             
             result = cgm_module.list_annotations(days=7)
             

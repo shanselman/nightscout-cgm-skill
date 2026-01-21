@@ -16,6 +16,7 @@ Commands:
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -229,7 +230,6 @@ def parse_annotation_time(time_str):
         return int(now.timestamp() * 1000)
     
     # Handle relative times like '1h ago', '30m ago', '2d ago'
-    import re
     relative_match = re.match(r'^(\d+)(m|h|d)\s*ago$', time_str.lower())
     if relative_match:
         amount = int(relative_match.group(1))
@@ -297,10 +297,8 @@ def add_annotation(time_str, tag, note=None):
     except ValueError as e:
         return {"error": str(e)}
     
-    conn = sqlite3.connect(DB_PATH)
-    
     # Ensure annotations table exists
-    create_database()
+    conn = create_database()
     
     created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
     
@@ -335,10 +333,8 @@ def list_annotations(tag=None, days=None):
     Returns:
         Dict with list of annotations
     """
-    conn = sqlite3.connect(DB_PATH)
-    
     # Ensure annotations table exists
-    create_database()
+    conn = create_database()
     
     query = 'SELECT id, timestamp_ms, tag, note, created_at FROM annotations'
     params = []
@@ -419,10 +415,8 @@ def get_annotations_for_timerange(start_ms, end_ms):
     Returns:
         List of annotation dicts
     """
-    conn = sqlite3.connect(DB_PATH)
-    
     # Ensure annotations table exists
-    create_database()
+    conn = create_database()
     
     cursor = conn.execute(
         'SELECT id, timestamp_ms, tag, note FROM annotations WHERE timestamp_ms >= ? AND timestamp_ms <= ? ORDER BY timestamp_ms',
