@@ -1,4 +1,6 @@
 requests>=2.25.0
+scikit-learn>=1.0.1
+numpy>=1.21.0
 
 # Development/Testing dependencies
 pytest>=7.0.0
