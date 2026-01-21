@@ -333,7 +333,17 @@ def get_current_glucose():
 
 
 def set_goal(metric, target_value):
-    """Set a goal for a specific metric (tir, cv, gmi, avg_glucose)."""
+    """
+    Set a goal for a specific metric (tir, cv, gmi, avg_glucose).
+    
+    Args:
+        metric: One of 'tir', 'cv', 'gmi', 'avg_glucose'
+        target_value: Target value in your current Nightscout units
+                     (for avg_glucose, use mg/dL or mmol/L based on your Nightscout settings)
+    
+    Note: Goals are stored in the units you provide. If you change your Nightscout
+          units setting (e.g., from mg/dL to mmol/L), you should re-set your goals.
+    """
     valid_metrics = ["tir", "cv", "gmi", "avg_glucose"]
     if metric not in valid_metrics:
         return {"error": f"Invalid metric. Must be one of: {', '.join(valid_metrics)}"}
