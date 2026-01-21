@@ -70,6 +70,15 @@ def temp_db(tmp_path):
         direction TEXT,
         device TEXT
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS annotations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp_ms INTEGER NOT NULL,
+        tag TEXT NOT NULL,
+        note TEXT,
+        created_at INTEGER NOT NULL
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_annotations_timestamp ON annotations(timestamp_ms)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_annotations_tag ON annotations(tag)')
     conn.commit()
     conn.close()
     return db_path
