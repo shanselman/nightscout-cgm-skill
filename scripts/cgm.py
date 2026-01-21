@@ -1593,6 +1593,10 @@ def generate_html_report(days=90, output_path=None):
     first_date = rows[0][2][:10] if rows[0][2] else "unknown"
     last_date = rows[-1][2][:10] if rows[-1][2] else "unknown"
     
+    # Get goals for display
+    goals_result = get_goals()
+    goals = goals_result.get("goals", {})
+    
     # =========================================================================
     # HTML Template with embedded Chart.js
     # =========================================================================
@@ -1770,6 +1774,31 @@ def generate_html_report(days=90, output_path=None):
         .stat-card.tir .value { color: var(--in-range); }
         .stat-card.gmi .value { color: var(--info); }
         .stat-card.cv .value { color: var(--warning); }
+        
+        .goal-indicator {
+            margin-top: 10px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .goal-indicator.met {
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+        
+        .goal-indicator.not-met {
+            color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+        
+        .goal-indicator .goal-label {
+            font-weight: 500;
+        }
         
         .chart-section {
             background: var(--bg-secondary);
@@ -1985,18 +2014,22 @@ def generate_html_report(days=90, output_path=None):
             <div class="stat-card tir">
                 <div class="value">%(tir_in_range).1f%%</div>
                 <div class="label">Time in Range (%(target_low)s-%(target_high)s %(unit)s)</div>
+                %(tir_goal)s
             </div>
             <div class="stat-card gmi">
                 <div class="value">%(gmi).1f%%</div>
                 <div class="label">GMI (Estimated A1C)</div>
+                %(gmi_goal)s
             </div>
             <div class="stat-card cv">
                 <div class="value">%(cv).1f%%</div>
                 <div class="label">CV (%(cv_status)s)</div>
+                %(cv_goal)s
             </div>
             <div class="stat-card">
                 <div class="value">%(mean)s</div>
                 <div class="label">Average Glucose (%(unit)s)</div>
+                %(avg_glucose_goal)s
             </div>
         </div>
         
@@ -2925,6 +2958,31 @@ def generate_html_report(days=90, output_path=None):
         chart_min = 40
         chart_max = 350
     
+    # Generate goal indicators HTML
+    def make_goal_html(metric_name, current_value, goal_info, lower_is_better=False):
+        """Generate HTML for a goal indicator."""
+        if not goal_info:
+            return ""
+        target = goal_info["target"]
+        if lower_is_better:
+            met = current_value <= target
+            symbol = "≤"
+        else:
+            met = current_value >= target
+            symbol = "≥"
+        
+        status_class = "met" if met else "not-met"
+        status_emoji = "✓" if met else "⚠"
+        
+        return f'''<div class="goal-indicator {status_class}">
+            <span class="goal-label">{status_emoji} Goal: {symbol} {target}</span>
+        </div>'''
+    
+    tir_goal_html = make_goal_html("TIR", tir_data["in_range"], goals.get("tir"))
+    cv_goal_html = make_goal_html("CV", cv, goals.get("cv"), lower_is_better=True)
+    gmi_goal_html = make_goal_html("GMI", gmi, goals.get("gmi"), lower_is_better=True)
+    avg_glucose_goal_html = make_goal_html("Avg Glucose", convert_glucose(round(raw_mean, 1)), goals.get("avg_glucose"), lower_is_better=True)
+    
     # Format the HTML
     html_content = html_template % {
         "first_date": first_date,
@@ -2941,6 +2999,10 @@ def generate_html_report(days=90, output_path=None):
         "cv": cv,
         "cv_status": "stable" if cv < 36 else "variable",
         "mean": convert_glucose(round(raw_mean, 1)),
+        "tir_goal": tir_goal_html,
+        "cv_goal": cv_goal_html,
+        "gmi_goal": gmi_goal_html,
+        "avg_glucose_goal": avg_glucose_goal_html,
         "urgent_low": convert_glucose(t["urgent_low"]),
         "target_low": convert_glucose(t["target_low"]),
         "target_low_minus": convert_glucose(t["target_low"] - 1),
