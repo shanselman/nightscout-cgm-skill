@@ -299,11 +299,31 @@ class TestReportCliCommand:
         report_parser.add_argument("--days", type=int, default=90)
         report_parser.add_argument("--output", "-o", type=str)
         report_parser.add_argument("--open", action="store_true")
+        report_parser.add_argument("--pdf", action="store_true")
         
         args = parser.parse_args(["report"])
         assert args.days == 90
         assert args.output is None
         assert args.open is False
+        assert args.pdf is False
+    
+    def test_report_command_pdf_flag(self, cgm_module):
+        """Report command should accept --pdf flag."""
+        import argparse
+        
+        parser = argparse.ArgumentParser()
+        subparsers = parser.add_subparsers(dest="command")
+        
+        report_parser = subparsers.add_parser("report")
+        report_parser.add_argument("--days", type=int, default=90)
+        report_parser.add_argument("--output", "-o", type=str)
+        report_parser.add_argument("--open", action="store_true")
+        report_parser.add_argument("--pdf", action="store_true")
+        
+        args = parser.parse_args(["report", "--pdf", "--days", "30", "--output", "report.pdf"])
+        assert args.pdf is True
+        assert args.days == 30
+        assert args.output == "report.pdf"
 
 
 class TestReportDateControls:
@@ -688,4 +708,93 @@ class TestReportDataIntegrity:
         
         # Check initial days is set
         assert "currentDays = 30" in content or "let currentDays = 30" in content
+
+
+class TestPdfGeneration:
+    """Tests for PDF generation functionality."""
+    
+    def test_pdf_flag_generates_pdf(self, cgm_module, populated_db, tmp_path):
+        """Should generate a PDF file when pdf=True."""
+        output_path = tmp_path / "test_report.pdf"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        result = cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path),
+                            pdf=True
+                        )
+        
+        assert "error" not in result
+        assert result["status"] == "success"
+        assert output_path.exists()
+        assert output_path.suffix == ".pdf"
+    
+    def test_pdf_default_path(self, cgm_module, populated_db):
+        """Should use .pdf extension for default path when pdf=True."""
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        result = cgm_module.generate_html_report(
+                            days=7,
+                            pdf=True
+                        )
+        
+        assert "error" not in result
+        assert result["report"].endswith(".pdf")
+    
+    def test_pdf_changes_html_extension(self, cgm_module, populated_db, tmp_path):
+        """Should change .html extension to .pdf when pdf=True."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        result = cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path),
+                            pdf=True
+                        )
+        
+        # Should have changed .html to .pdf
+        pdf_path = tmp_path / "test_report.pdf"
+        assert pdf_path.exists()
+        assert result["report"].endswith(".pdf")
+    
+    def test_html_has_print_styles(self, cgm_module, populated_db, tmp_path):
+        """HTML should include print-friendly CSS for PDF generation."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        
+        # Check for print media query
+        assert "@media print" in content
+        # Check for print-specific rules
+        assert "page-break-inside" in content or "page-break-before" in content
+
 

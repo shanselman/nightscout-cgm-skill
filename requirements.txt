@@ -1,4 +1,5 @@
 requests>=2.25.0
+weasyprint>=60.0
 
 # Development/Testing dependencies
 pytest>=7.0.0

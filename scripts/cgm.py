@@ -1225,7 +1225,7 @@ def find_worst_days(days=21, hour_start=None, hour_end=None, limit=5):
     }
 
 
-def generate_html_report(days=90, output_path=None):
+def generate_html_report(days=90, output_path=None, pdf=False):
     """
     Generate a comprehensive, self-contained HTML report with interactive charts.
     Similar to tally's spending reports but for diabetes/CGM data.
@@ -1804,6 +1804,48 @@ def generate_html_report(days=90, output_path=None):
             
             header h1 {
                 font-size: 1.8rem;
+            }
+        }
+        
+        /* Print-friendly styles for PDF generation */
+        @media print {
+            body {
+                background: white;
+                color: #000;
+            }
+            
+            .container {
+                max-width: 100%%;
+                padding: 20px;
+            }
+            
+            .date-controls {
+                display: none; /* Hide interactive controls in PDF */
+            }
+            
+            .chart-section {
+                page-break-inside: avoid;
+                margin-bottom: 30px;
+            }
+            
+            .stats-grid {
+                page-break-inside: avoid;
+            }
+            
+            .disclaimer {
+                border-color: #000;
+                background: #f5f5f5;
+            }
+            
+            /* Ensure charts are visible */
+            .chart-container {
+                background: white;
+                border: 1px solid #ddd;
+            }
+            
+            canvas {
+                max-width: 100%% !important;
+                height: auto !important;
             }
         }
     </style>
@@ -2821,14 +2863,46 @@ def generate_html_report(days=90, output_path=None):
     }
     
     # Determine output path
-    if output_path is None:
-        output_path = SKILL_DIR / "nightscout_report.html"
+    if pdf:
+        # For PDF, default to .pdf extension
+        if output_path is None:
+            output_path = SKILL_DIR / "nightscout_report.pdf"
+        else:
+            output_path = Path(output_path)
+            # If user specified .html, change to .pdf
+            if output_path.suffix == '.html':
+                output_path = output_path.with_suffix('.pdf')
     else:
-        output_path = Path(output_path)
+        # For HTML, default to .html extension
+        if output_path is None:
+            output_path = SKILL_DIR / "nightscout_report.html"
+        else:
+            output_path = Path(output_path)
     
-    # Write the file
-    with open(output_path, "w", encoding="utf-8") as f:
+    # Generate HTML first (always needed)
+    html_temp_path = output_path.with_suffix('.html') if pdf else output_path
+    with open(html_temp_path, "w", encoding="utf-8") as f:
         f.write(html_content)
+    
+    # Convert to PDF if requested
+    if pdf:
+        try:
+            from weasyprint import HTML
+            HTML(filename=str(html_temp_path)).write_pdf(str(output_path))
+            # Clean up temporary HTML file if we created it for PDF generation
+            if html_temp_path != output_path:
+                import os
+                os.remove(html_temp_path)
+        except ImportError:
+            return {
+                "error": "WeasyPrint library not installed. Install with: pip install weasyprint",
+                "status": "error"
+            }
+        except Exception as e:
+            return {
+                "error": f"Failed to generate PDF: {str(e)}",
+                "status": "error"
+            }
     
     return {
         "status": "success",
@@ -2993,6 +3067,10 @@ def main():
         "--open", action="store_true",
         help="Open the report in default browser after generating"
     )
+    report_parser.add_argument(
+        "--pdf", action="store_true",
+        help="Generate PDF output instead of HTML"
+    )
 
     args = parser.parse_args()
 
@@ -3049,15 +3127,16 @@ def main():
     elif args.command == "report":
         result = generate_html_report(
             days=args.days,
-            output_path=args.output
+            output_path=args.output,
+            pdf=args.pdf
         )
         if "error" not in result:
             print(f"Report generated: {result['report']}")
             print(f"  Period: {result['date_range']}")
             print(f"  Readings: {result['readings']}")
             
-            # Open in browser if requested
-            if args.open:
+            # Open in browser if requested (only for HTML, not PDF)
+            if args.open and not args.pdf:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
     else:
