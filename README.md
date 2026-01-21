@@ -12,6 +12,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Goal Tracking** - Set personal goals for TIR, CV, GMI, and average glucose with visual progress indicators
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
@@ -104,6 +105,68 @@ python scripts/cgm.py chart --sparkline
 
 # Weekly heatmap
 python scripts/cgm.py chart --heatmap
+```
+
+## Goal Tracking
+
+Set personal goals and track progress over time with visual feedback.
+
+### Set Goals
+
+```bash
+# Set a Time-in-Range goal of 70%
+python scripts/cgm.py goal set --tir 70
+
+# Set a CV (variability) goal of 33%
+python scripts/cgm.py goal set --cv 33
+
+# Set a GMI (estimated A1C) goal
+python scripts/cgm.py goal set --gmi 6.5
+
+# Set average glucose goal (in your configured units)
+python scripts/cgm.py goal set --avg-glucose 140
+
+# Set multiple goals at once
+python scripts/cgm.py goal set --tir 70 --cv 33 --gmi 6.5
+```
+
+### View Goals
+
+```bash
+# View all current goals
+python scripts/cgm.py goal view
+```
+
+### Track Progress
+
+```bash
+# See progress toward goals (last 7 days by default)
+python scripts/cgm.py goal progress
+
+# Check progress over last 14 days
+python scripts/cgm.py goal progress --days 14
+```
+
+### Clear Goals
+
+```bash
+# Clear a specific goal
+python scripts/cgm.py goal clear tir
+
+# Clear all goals
+python scripts/cgm.py goal clear
+```
+
+### Goal Visualization in Reports
+
+When you generate HTML reports, any active goals will be displayed as indicators on the Key Metrics cards:
+- ✓ Green indicator when you're meeting your goal
+- ⚠ Yellow indicator when you're not quite there yet
+- Goals show target values for easy tracking
+
+```bash
+# Generate report with goal indicators
+python scripts/cgm.py report --days 90 --open
 ```
 
 ## Privacy & Data Architecture
