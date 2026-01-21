@@ -12,8 +12,8 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
-- **Trend Alerts** - Automatic detection of concerning patterns (recurring lows/highs, time-of-day issues)
 - **Current Glucose** - Real-time blood glucose with trend direction
+- **Period Comparison** - Compare different time periods side-by-side to track progress
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
@@ -36,7 +36,6 @@ python scripts/cgm.py report --days 90 --open
 
 - **Date Range Controls** - Quick buttons for 7d/14d/30d/90d/6mo/1yr/All, plus custom date pickers
 - **All charts update dynamically** - No server needed, everything recalculates in your browser
-- **Trend Alerts Dashboard** - Automatic detection of concerning patterns and trends
 - **Key Stats Dashboard** - Time-in-Range %, GMI (estimated A1C), CV (variability), average glucose
 - **7 Interactive Charts:**
   - Time-in-Range pie chart
@@ -46,22 +45,6 @@ python scripts/cgm.py report --days 90 --open
   - Glucose distribution histogram
   - Time-in-Range heatmap (day × hour) with hover tooltips
   - Weekly summary
-
-## Trend Alerts
-
-Proactively surfaces concerning patterns in your CGM data. The system automatically detects:
-
-- **Recurring Lows** - "You've had 3 lows after 2am this week"
-- **Recurring Highs** - "Friday lunches are consistently high"
-- **Time-of-Day Issues** - Specific hours that consistently cause problems
-- **Day-of-Week Issues** - Problematic days that need attention
-- **Trend Changes** - "Your overnight control has improved 15% this month"
-
-Alerts are shown in both:
-- **CLI output** - `python scripts/cgm.py alerts --days 90`
-- **HTML reports** - Integrated dashboard at the top of reports
-
-Each alert includes severity (high/medium/low), specific details, and actionable insights. High-severity alerts (like overnight lows) are prioritized for safety.
 
 ### Color Scheme
 
@@ -82,7 +65,7 @@ Just ask naturally:
 ```
 "What's my current glucose?"
 "Generate a report of my last 90 days"
-"Show me trend alerts for concerning patterns"
+"Compare this week to last week"
 "What patterns do you see in my data?"
 "What's happening on Tuesdays after lunch?"
 "When do I tend to go low?"
@@ -91,19 +74,22 @@ Just ask naturally:
 "What does Saturday look like?"
 "What was my worst lunch this week?"
 "Show me what happened yesterday during dinner"
+"How am I doing vs 90 days ago?"
 ```
 
 Or use the CLI directly:
 
 ```bash
-# Generate interactive HTML report (includes trend alerts)
+# Generate interactive HTML report
 python scripts/cgm.py report --days 90 --open
-
-# Show trend alerts for concerning patterns
-python scripts/cgm.py alerts --days 90
 
 # Current glucose
 python scripts/cgm.py current
+
+# Compare two time periods
+python scripts/cgm.py compare --period1 "last 7 days" --period2 "previous 7 days"
+python scripts/cgm.py compare --period1 "this week" --period2 "last week"
+python scripts/cgm.py compare --period1 "January" --period2 "December"
 
 # Find patterns (best/worst times, problem areas)
 python scripts/cgm.py patterns
@@ -269,6 +255,11 @@ Just ask naturally:
 - "Show me a heatmap of my glucose"
 - "What does Saturday look like?"
 
+**Period comparison:**
+- "Compare this week to last week"
+- "How does January compare to December?"
+- "How am I doing vs 90 days ago?"
+
 ### Direct CLI Usage
 
 ```bash
@@ -286,6 +277,12 @@ python scripts/cgm.py analyze
 
 # Analyze last 30 days
 python scripts/cgm.py analyze --days 30
+
+# Compare two time periods
+python scripts/cgm.py compare --period1 "last 7 days" --period2 "previous 7 days"
+python scripts/cgm.py compare --period1 "this week" --period2 "last week"
+python scripts/cgm.py compare --period1 "this month" --period2 "last month"
+python scripts/cgm.py compare --period1 "January" --period2 "December"
 
 # Find patterns automatically (best/worst times, problem areas)
 python scripts/cgm.py patterns
@@ -411,6 +408,60 @@ The report is:
   "gmi_estimated_a1c": 6.6,
   "cv_variability": 30.4,
   "cv_status": "stable"
+}
+```
+
+### Period Comparison
+```json
+{
+  "comparison": {
+    "period1": {
+      "date_range": {"from": "2026-01-14", "to": "2026-01-21", "description": "Last 7 days"},
+      "readings": 2016,
+      "statistics": {"count": 2016, "mean": 125.3, "std": 35.2, "median": 118},
+      "time_in_range": {
+        "very_low_pct": 0.3,
+        "low_pct": 1.8,
+        "in_range_pct": 78.5,
+        "high_pct": 15.2,
+        "very_high_pct": 4.2
+      },
+      "gmi_estimated_a1c": 6.3,
+      "cv_variability": 28.1,
+      "cv_status": "stable"
+    },
+    "period2": {
+      "date_range": {"from": "2026-01-07", "to": "2026-01-14", "description": "Previous 7 days"},
+      "readings": 2016,
+      "statistics": {"count": 2016, "mean": 145.8, "std": 42.6, "median": 138},
+      "time_in_range": {
+        "very_low_pct": 0.8,
+        "low_pct": 2.5,
+        "in_range_pct": 68.2,
+        "high_pct": 21.3,
+        "very_high_pct": 7.2
+      },
+      "gmi_estimated_a1c": 6.8,
+      "cv_variability": 29.2,
+      "cv_status": "stable"
+    }
+  },
+  "deltas": {
+    "average_glucose": {"value": -20.5, "change": "improved", "percentage_change": -14.1},
+    "time_in_range": {"value": 10.3, "change": "improved", "percentage_points": 10.3},
+    "gmi_estimated_a1c": {"value": -0.5, "change": "improved", "percentage_change": -7.4},
+    "cv_variability": {"value": -1.1, "change": "improved", "percentage_change": -3.8}
+  },
+  "summary": {
+    "period1_description": "Last 7 days",
+    "period2_description": "Previous 7 days",
+    "key_improvements": [
+      "Time in range increased by 10.3 percentage points",
+      "GMI (estimated A1C) decreased by 0.5",
+      "Glucose variability (CV) decreased by 1.1%"
+    ],
+    "key_regressions": ["No significant regressions"]
+  }
 }
 ```
 
