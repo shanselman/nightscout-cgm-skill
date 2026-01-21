@@ -12,13 +12,13 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Trend Alerts** - Automatic detection of concerning patterns (recurring lows/highs, time-of-day issues)
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
-- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
 
@@ -36,6 +36,7 @@ python scripts/cgm.py report --days 90 --open
 
 - **Date Range Controls** - Quick buttons for 7d/14d/30d/90d/6mo/1yr/All, plus custom date pickers
 - **All charts update dynamically** - No server needed, everything recalculates in your browser
+- **Trend Alerts Dashboard** - Automatic detection of concerning patterns and trends
 - **Key Stats Dashboard** - Time-in-Range %, GMI (estimated A1C), CV (variability), average glucose
 - **7 Interactive Charts:**
   - Time-in-Range pie chart
@@ -45,6 +46,22 @@ python scripts/cgm.py report --days 90 --open
   - Glucose distribution histogram
   - Time-in-Range heatmap (day × hour) with hover tooltips
   - Weekly summary
+
+## Trend Alerts
+
+Proactively surfaces concerning patterns in your CGM data. The system automatically detects:
+
+- **Recurring Lows** - "You've had 3 lows after 2am this week"
+- **Recurring Highs** - "Friday lunches are consistently high"
+- **Time-of-Day Issues** - Specific hours that consistently cause problems
+- **Day-of-Week Issues** - Problematic days that need attention
+- **Trend Changes** - "Your overnight control has improved 15% this month"
+
+Alerts are shown in both:
+- **CLI output** - `python scripts/cgm.py alerts --days 90`
+- **HTML reports** - Integrated dashboard at the top of reports
+
+Each alert includes severity (high/medium/low), specific details, and actionable insights. High-severity alerts (like overnight lows) are prioritized for safety.
 
 ### Color Scheme
 
@@ -65,6 +82,7 @@ Just ask naturally:
 ```
 "What's my current glucose?"
 "Generate a report of my last 90 days"
+"Show me trend alerts for concerning patterns"
 "What patterns do you see in my data?"
 "What's happening on Tuesdays after lunch?"
 "When do I tend to go low?"
@@ -78,8 +96,11 @@ Just ask naturally:
 Or use the CLI directly:
 
 ```bash
-# Generate interactive HTML report
+# Generate interactive HTML report (includes trend alerts)
 python scripts/cgm.py report --days 90 --open
+
+# Show trend alerts for concerning patterns
+python scripts/cgm.py alerts --days 90
 
 # Current glucose
 python scripts/cgm.py current

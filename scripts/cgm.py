@@ -3180,7 +3180,7 @@ def generate_html_report(days=90, output_path=None):
                 parts.push(`avg: ${details.avg_glucose} ${details.unit}`);
             }
             if (details.recent_tir !== undefined && details.older_tir !== undefined) {
-                parts.push(`recent TIR: ${details.recent_tir}%, previous: ${details.older_tir}%`);
+                parts.push(`recent TIR: ${details.recent_tir}%%, previous: ${details.older_tir}%%`);
             }
             
             return parts.join(' • ');
