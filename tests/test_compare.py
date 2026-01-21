@@ -1,6 +1,7 @@
 """
 Tests for period comparison functionality.
 """
+import random
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -122,7 +123,6 @@ def multi_week_db(temp_db):
                         base = 150  # Worse average
                     
                     # Add variation
-                    import random
                     random.seed(date_ms)
                     variation = random.randint(-15, 15)
                     sgv = max(40, min(400, base + variation))

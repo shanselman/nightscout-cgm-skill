@@ -11,6 +11,7 @@ Commands:
 import argparse
 import json
 import os
+import re
 import sqlite3
 import sys
 from collections import defaultdict
@@ -310,7 +311,6 @@ def parse_period(period_str):
     # Handle relative day ranges
     if "last" in period_str and "days" in period_str:
         # Extract number: 'last 7 days', 'last 30 days'
-        import re
         match = re.search(r'(\d+)\s*days?', period_str)
         if match:
             days = int(match.group(1))
@@ -320,7 +320,6 @@ def parse_period(period_str):
     
     if "previous" in period_str and "days" in period_str:
         # 'previous 7 days' means the 7 days before the last 7 days
-        import re
         match = re.search(r'(\d+)\s*days?', period_str)
         if match:
             days = int(match.group(1))
@@ -369,7 +368,6 @@ def parse_period(period_str):
         if month_name in period_str:
             year = now.year
             # Check if year is specified in the string
-            import re
             year_match = re.search(r'\b(20\d{2})\b', period_str)
             if year_match:
                 year = int(year_match.group(1))
@@ -384,7 +382,6 @@ def parse_period(period_str):
     
     # Handle "N days ago"
     if "days ago" in period_str:
-        import re
         match = re.search(r'(\d+)\s*days?\s+ago', period_str)
         if match:
             days_ago = int(match.group(1))
@@ -473,9 +470,20 @@ def compare_periods(period1_str, period2_str):
         if val1 is None or val2 is None:
             return None
         delta = val1 - val2
+        
+        # Determine change type
+        if delta == 0:
+            change = "unchanged"
+        elif is_percentage:
+            change = "changed"
+        elif delta < 0:
+            change = "improved"
+        else:
+            change = "worsened"
+        
         return {
             "value": round(delta, 1),
-            "change": "improved" if delta < 0 and not is_percentage else "worsened" if delta > 0 and not is_percentage else "unchanged" if delta == 0 else "changed",
+            "change": change,
             "percentage_change": round((delta / val2 * 100), 1) if val2 != 0 else None
         }
     
