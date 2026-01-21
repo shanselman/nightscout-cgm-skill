@@ -326,3 +326,103 @@ class TestOutputFormat:
                 # Should be valid JSON
                 result = json.loads(captured.out)
                 assert "glucose" in result
+
+
+class TestGoalCommand:
+    """Tests for 'goal' command parsing."""
+    
+    def test_goal_set_tir(self, cgm_module):
+        """'goal set --tir' command should work."""
+        with patch.object(cgm_module, "set_goal") as mock_set:
+            mock_set.return_value = {"status": "success", "metric": "tir", "target": 70}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "set", "--tir", "70"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_set.assert_called_once_with("tir", 70.0)
+    
+    def test_goal_set_cv(self, cgm_module):
+        """'goal set --cv' command should work."""
+        with patch.object(cgm_module, "set_goal") as mock_set:
+            mock_set.return_value = {"status": "success", "metric": "cv", "target": 33}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "set", "--cv", "33"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_set.assert_called_once_with("cv", 33.0)
+    
+    def test_goal_set_multiple(self, cgm_module):
+        """'goal set' with multiple goals should work."""
+        with patch.object(cgm_module, "set_goal") as mock_set:
+            mock_set.return_value = {"status": "success"}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "set", "--tir", "70", "--cv", "33"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    assert mock_set.call_count == 2
+    
+    def test_goal_view(self, cgm_module):
+        """'goal view' command should work."""
+        with patch.object(cgm_module, "get_goals") as mock_get:
+            mock_get.return_value = {"goals": {"tir": {"target": 70}}}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "view"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_get.assert_called_once()
+    
+    def test_goal_clear_all(self, cgm_module):
+        """'goal clear' without metric should clear all."""
+        with patch.object(cgm_module, "clear_goal") as mock_clear:
+            mock_clear.return_value = {"status": "success", "message": "All goals cleared"}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "clear"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_clear.assert_called_once_with(None)
+    
+    def test_goal_clear_specific(self, cgm_module):
+        """'goal clear <metric>' should clear specific goal."""
+        with patch.object(cgm_module, "clear_goal") as mock_clear:
+            mock_clear.return_value = {"status": "success", "message": "Goal cleared: tir"}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "clear", "tir"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_clear.assert_called_once_with("tir")
+    
+    def test_goal_progress(self, cgm_module):
+        """'goal progress' command should work."""
+        with patch.object(cgm_module, "calculate_goal_progress") as mock_progress:
+            mock_progress.return_value = {"progress": {}}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "progress"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_progress.assert_called_once_with(7)
+    
+    def test_goal_progress_with_days(self, cgm_module):
+        """'goal progress --days N' should pass days parameter."""
+        with patch.object(cgm_module, "calculate_goal_progress") as mock_progress:
+            mock_progress.return_value = {"progress": {}}
+            with patch.object(sys, "argv", ["cgm.py", "goal", "progress", "--days", "14"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_progress.assert_called_once_with(14)

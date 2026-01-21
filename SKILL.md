@@ -39,6 +39,16 @@ Where `<skill-path>` is the location where this skill is installed (e.g., `~/.co
 | `day <date> [options]` | View all readings for a specific date |
 | `worst [options]` | Find your worst days for glucose control |
 | `chart [options]` | Terminal visualizations (heatmap, sparkline, day chart) |
+| `goal <action>` | Set and track personal goals (TIR, CV, GMI, average glucose) |
+| `report [options]` | Generate interactive HTML report with charts |
+
+### Goal Command
+
+Set and track personal goals for your glucose management:
+- `goal set [--tir PCT] [--cv PCT] [--gmi VALUE] [--avg-glucose VALUE]` - Set goals
+- `goal view` - View current goals
+- `goal progress [--days N]` - Track progress toward goals (default: 7 days)
+- `goal clear [metric]` - Clear specific goal or all goals
 
 ### Day Command
 
@@ -115,6 +125,21 @@ python scripts/cgm.py chart --heatmap
 # Show hourly breakdown for a specific day
 python scripts/cgm.py chart --day Saturday
 
+# Set a Time-in-Range goal of 70%
+python scripts/cgm.py goal set --tir 70
+
+# Set multiple goals at once
+python scripts/cgm.py goal set --tir 70 --cv 33 --gmi 6.5
+
+# View current goals
+python scripts/cgm.py goal view
+
+# Track progress toward goals (last 7 days)
+python scripts/cgm.py goal progress
+
+# Generate interactive HTML report with goal indicators
+python scripts/cgm.py report --days 90 --open
+
 # Refresh data from Nightscout
 python scripts/cgm.py refresh
 ```
@@ -138,6 +163,9 @@ With the pattern analysis capabilities, you can ask natural questions like:
 - "What was my worst lunch this week?" (you'll be asked what hours you eat lunch)
 - "Show me what happened yesterday during dinner"
 - "What were my worst days for breakfast the last two weeks?"
+- "Set a time-in-range goal of 70%"
+- "What's my progress toward my CV goal?"
+- "Show me a report with my goal progress"
 
 ## Output Interpretation
 

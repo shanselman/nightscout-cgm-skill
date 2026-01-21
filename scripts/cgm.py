@@ -116,6 +116,11 @@ def create_database():
         direction TEXT,
         device TEXT
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS goals (
+        metric TEXT PRIMARY KEY,
+        target_value REAL,
+        created_at INTEGER
+    )''')
     conn.commit()
     return conn
 
@@ -325,6 +330,153 @@ def get_current_glucose():
             "status": status
         }
     return {"error": "No data available"}
+
+
+def set_goal(metric, target_value):
+    """
+    Set a goal for a specific metric (tir, cv, gmi, avg_glucose).
+    
+    Args:
+        metric: One of 'tir', 'cv', 'gmi', 'avg_glucose'
+        target_value: Target value in your current Nightscout units
+                     (for avg_glucose, use mg/dL or mmol/L based on your Nightscout settings)
+    
+    Note: Goals are stored in the units you provide. If you change your Nightscout
+          units setting (e.g., from mg/dL to mmol/L), you should re-set your goals.
+    """
+    valid_metrics = ["tir", "cv", "gmi", "avg_glucose"]
+    if metric not in valid_metrics:
+        return {"error": f"Invalid metric. Must be one of: {', '.join(valid_metrics)}"}
+    
+    # Validate target values
+    if metric == "tir" and not (0 <= target_value <= 100):
+        return {"error": "Time-in-range goal must be between 0 and 100"}
+    if metric == "cv" and not (0 <= target_value <= 100):
+        return {"error": "CV goal must be between 0 and 100"}
+    if metric == "gmi" and not (4 <= target_value <= 14):
+        return {"error": "GMI goal must be between 4 and 14"}
+    if metric == "avg_glucose" and target_value <= 0:
+        return {"error": "Average glucose goal must be positive"}
+    
+    conn = create_database()
+    created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+    conn.execute(
+        "INSERT OR REPLACE INTO goals (metric, target_value, created_at) VALUES (?, ?, ?)",
+        (metric, target_value, created_at)
+    )
+    conn.commit()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "metric": metric,
+        "target": target_value,
+        "message": f"Goal set: {metric} = {target_value}"
+    }
+
+
+def get_goals():
+    """Get all current goals."""
+    conn = create_database()
+    rows = conn.execute(
+        "SELECT metric, target_value, created_at FROM goals ORDER BY metric"
+    ).fetchall()
+    conn.close()
+    
+    goals = {}
+    for metric, target, created_at in rows:
+        goals[metric] = {
+            "target": target,
+            "created_at": created_at
+        }
+    
+    return {"goals": goals}
+
+
+def clear_goal(metric=None):
+    """Clear a specific goal or all goals if metric is None."""
+    conn = create_database()
+    
+    if metric:
+        conn.execute("DELETE FROM goals WHERE metric = ?", (metric,))
+        message = f"Goal cleared: {metric}"
+    else:
+        conn.execute("DELETE FROM goals")
+        message = "All goals cleared"
+    
+    conn.commit()
+    conn.close()
+    
+    return {"status": "success", "message": message}
+
+
+def calculate_goal_progress(days=7):
+    """
+    Calculate progress toward goals over time.
+    Returns current values, goal targets, and historical trend.
+    """
+    goals_result = get_goals()
+    goals = goals_result.get("goals", {})
+    
+    if not goals:
+        return {"message": "No goals set. Use 'cgm.py goal set' to set goals."}
+    
+    # Get current metrics
+    analysis = analyze_cgm(days)
+    if "error" in analysis:
+        return analysis
+    
+    progress = {}
+    
+    # Calculate progress for each goal
+    if "tir" in goals:
+        current_tir = analysis["time_in_range"]["in_range_pct"]
+        target_tir = goals["tir"]["target"]
+        progress["tir"] = {
+            "current": current_tir,
+            "target": target_tir,
+            "met": current_tir >= target_tir,
+            "percentage": min(100, (current_tir / target_tir * 100)) if target_tir > 0 else 0
+        }
+    
+    if "cv" in goals:
+        current_cv = analysis["cv_variability"]
+        target_cv = goals["cv"]["target"]
+        # For CV, lower is better
+        progress["cv"] = {
+            "current": current_cv,
+            "target": target_cv,
+            "met": current_cv <= target_cv,
+            "percentage": min(100, (target_cv / current_cv * 100)) if current_cv > 0 else 100
+        }
+    
+    if "gmi" in goals:
+        current_gmi = analysis["gmi_estimated_a1c"]
+        target_gmi = goals["gmi"]["target"]
+        # For GMI, lower is better
+        progress["gmi"] = {
+            "current": current_gmi,
+            "target": target_gmi,
+            "met": current_gmi <= target_gmi,
+            "percentage": min(100, (target_gmi / current_gmi * 100)) if current_gmi > 0 else 100
+        }
+    
+    if "avg_glucose" in goals:
+        current_avg = analysis["statistics"]["mean"]
+        target_avg = goals["avg_glucose"]["target"]
+        # For average glucose, lower is better (assuming target is reasonable)
+        progress["avg_glucose"] = {
+            "current": current_avg,
+            "target": target_avg,
+            "met": current_avg <= target_avg,
+            "percentage": min(100, (target_avg / current_avg * 100)) if current_avg > 0 else 100
+        }
+    
+    return {
+        "period_days": days,
+        "progress": progress,
+        "date_range": analysis["date_range"]
+    }
 
 
 def make_sparkline(values, min_val=40, max_val=400):
@@ -1451,6 +1603,10 @@ def generate_html_report(days=90, output_path=None):
     first_date = rows[0][2][:10] if rows[0][2] else "unknown"
     last_date = rows[-1][2][:10] if rows[-1][2] else "unknown"
     
+    # Get goals for display
+    goals_result = get_goals()
+    goals = goals_result.get("goals", {})
+    
     # =========================================================================
     # HTML Template with embedded Chart.js
     # =========================================================================
@@ -1628,6 +1784,31 @@ def generate_html_report(days=90, output_path=None):
         .stat-card.tir .value { color: var(--in-range); }
         .stat-card.gmi .value { color: var(--info); }
         .stat-card.cv .value { color: var(--warning); }
+        
+        .goal-indicator {
+            margin-top: 10px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+        
+        .goal-indicator.met {
+            color: var(--success);
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+        
+        .goal-indicator.not-met {
+            color: var(--warning);
+            background: rgba(245, 158, 11, 0.1);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+        
+        .goal-indicator .goal-label {
+            font-weight: 500;
+        }
         
         .chart-section {
             background: var(--bg-secondary);
@@ -1843,18 +2024,22 @@ def generate_html_report(days=90, output_path=None):
             <div class="stat-card tir">
                 <div class="value">%(tir_in_range).1f%%</div>
                 <div class="label">Time in Range (%(target_low)s-%(target_high)s %(unit)s)</div>
+                %(tir_goal)s
             </div>
             <div class="stat-card gmi">
                 <div class="value">%(gmi).1f%%</div>
                 <div class="label">GMI (Estimated A1C)</div>
+                %(gmi_goal)s
             </div>
             <div class="stat-card cv">
                 <div class="value">%(cv).1f%%</div>
                 <div class="label">CV (%(cv_status)s)</div>
+                %(cv_goal)s
             </div>
             <div class="stat-card">
                 <div class="value">%(mean)s</div>
                 <div class="label">Average Glucose (%(unit)s)</div>
+                %(avg_glucose_goal)s
             </div>
         </div>
         
@@ -2783,6 +2968,31 @@ def generate_html_report(days=90, output_path=None):
         chart_min = 40
         chart_max = 350
     
+    # Generate goal indicators HTML
+    def make_goal_html(metric_name, current_value, goal_info, lower_is_better=False):
+        """Generate HTML for a goal indicator."""
+        if not goal_info:
+            return ""
+        target = goal_info["target"]
+        if lower_is_better:
+            met = current_value <= target
+            symbol = "≤"
+        else:
+            met = current_value >= target
+            symbol = "≥"
+        
+        status_class = "met" if met else "not-met"
+        status_emoji = "✓" if met else "⚠"
+        
+        return f'''<div class="goal-indicator {status_class}">
+            <span class="goal-label">{status_emoji} Goal: {symbol} {target}</span>
+        </div>'''
+    
+    tir_goal_html = make_goal_html("TIR", tir_data["in_range"], goals.get("tir"))
+    cv_goal_html = make_goal_html("CV", cv, goals.get("cv"), lower_is_better=True)
+    gmi_goal_html = make_goal_html("GMI", gmi, goals.get("gmi"), lower_is_better=True)
+    avg_glucose_goal_html = make_goal_html("Avg Glucose", convert_glucose(round(raw_mean, 1)), goals.get("avg_glucose"), lower_is_better=True)
+    
     # Format the HTML
     html_content = html_template % {
         "first_date": first_date,
@@ -2799,6 +3009,10 @@ def generate_html_report(days=90, output_path=None):
         "cv": cv,
         "cv_status": "stable" if cv < 36 else "variable",
         "mean": convert_glucose(round(raw_mean, 1)),
+        "tir_goal": tir_goal_html,
+        "cv_goal": cv_goal_html,
+        "gmi_goal": gmi_goal_html,
+        "avg_glucose_goal": avg_glucose_goal_html,
         "urgent_low": convert_glucose(t["urgent_low"]),
         "target_low": convert_glucose(t["target_low"]),
         "target_low_minus": convert_glucose(t["target_low"] - 1),
@@ -2994,6 +3208,49 @@ def main():
         help="Open the report in default browser after generating"
     )
 
+    # Goal command - set and track personal goals
+    goal_parser = subparsers.add_parser(
+        "goal", help="Set and track personal goals (TIR, CV, GMI, avg glucose)"
+    )
+    goal_subparsers = goal_parser.add_subparsers(dest="goal_action", help="Goal actions")
+    
+    # goal set
+    set_parser = goal_subparsers.add_parser("set", help="Set a goal")
+    set_parser.add_argument(
+        "--tir", type=float, metavar="PCT",
+        help="Time-in-range goal (percentage, e.g., 70)"
+    )
+    set_parser.add_argument(
+        "--cv", type=float, metavar="PCT",
+        help="Coefficient of variation goal (percentage, e.g., 33)"
+    )
+    set_parser.add_argument(
+        "--gmi", type=float, metavar="VALUE",
+        help="GMI (estimated A1C) goal (e.g., 6.5)"
+    )
+    set_parser.add_argument(
+        "--avg-glucose", type=float, metavar="VALUE",
+        help="Average glucose goal (in your configured units)"
+    )
+    
+    # goal view
+    goal_subparsers.add_parser("view", help="View current goals")
+    
+    # goal clear
+    clear_parser = goal_subparsers.add_parser("clear", help="Clear goals")
+    clear_parser.add_argument(
+        "metric", nargs="?",
+        choices=["tir", "cv", "gmi", "avg_glucose"],
+        help="Specific metric to clear (if omitted, clears all goals)"
+    )
+    
+    # goal progress
+    progress_parser = goal_subparsers.add_parser("progress", help="View progress toward goals")
+    progress_parser.add_argument(
+        "--days", type=int, default=7,
+        help="Number of days to analyze for progress (default: 7)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -3060,6 +3317,33 @@ def main():
             if args.open:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
+    elif args.command == "goal":
+        if args.goal_action == "set":
+            # Set goals based on provided arguments
+            results = []
+            if args.tir is not None:
+                results.append(set_goal("tir", args.tir))
+            if args.cv is not None:
+                results.append(set_goal("cv", args.cv))
+            if args.gmi is not None:
+                results.append(set_goal("gmi", args.gmi))
+            if args.avg_glucose is not None:
+                results.append(set_goal("avg_glucose", args.avg_glucose))
+            
+            if not results:
+                result = {"error": "No goals specified. Use --tir, --cv, --gmi, or --avg-glucose"}
+            elif len(results) == 1:
+                result = results[0]
+            else:
+                result = {"goals_set": results}
+        elif args.goal_action == "view":
+            result = get_goals()
+        elif args.goal_action == "clear":
+            result = clear_goal(args.metric if hasattr(args, 'metric') else None)
+        elif args.goal_action == "progress":
+            result = calculate_goal_progress(args.days)
+        else:
+            result = {"error": "Invalid goal action. Use: set, view, clear, or progress"}
     else:
         parser.print_help()
         sys.exit(1)
