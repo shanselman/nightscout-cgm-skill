@@ -101,7 +101,7 @@ def get_thresholds():
         "urgent_high": thresholds.get("bgHigh", 250),
     }
 
-SKILL_DIR= Path(__file__).parent.parent
+SKILL_DIR = Path(__file__).parent.parent
 DB_PATH = SKILL_DIR / "cgm_data.db"
 
 
@@ -3010,13 +3010,17 @@ def _run_daemon_loop(config):
     # Detach from parent
     os.setsid()
     
-    # Close standard file descriptors
+    # Close standard file descriptors and redirect to devnull
     sys.stdin.close()
-    sys.stdout = open(os.devnull, 'w')
-    sys.stderr = open(os.devnull, 'w')
+    stdout_devnull = open(os.devnull, 'w')
+    stderr_devnull = open(os.devnull, 'w')
+    sys.stdout = stdout_devnull
+    sys.stderr = stderr_devnull
     
-    # Cleanup PID file on exit
+    # Cleanup PID file and file handles on exit
     def cleanup():
+        stdout_devnull.close()
+        stderr_devnull.close()
         if DAEMON_PID_FILE.exists():
             DAEMON_PID_FILE.unlink()
     
