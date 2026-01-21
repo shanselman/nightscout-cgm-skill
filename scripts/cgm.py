@@ -1028,6 +1028,265 @@ def find_patterns(days=90):
     }
 
 
+def detect_trend_alerts(days=90, min_occurrences=2):
+    """
+    Detect concerning patterns and trends in CGM data.
+    Proactively surfaces issues like recurring lows/highs.
+    
+    Args:
+        days: Number of days to analyze
+        min_occurrences: Minimum number of occurrences to trigger an alert (default: 2)
+    
+    Returns:
+        Dictionary with detected alerts categorized by type
+    """
+    if not ensure_data(days):
+        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+    
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+    
+    if not rows:
+        return {"error": "No data found for the specified period."}
+    
+    t = get_thresholds()
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    
+    # Track events by various dimensions
+    lows_by_hour = defaultdict(list)
+    lows_by_day = defaultdict(list)
+    lows_by_day_hour = defaultdict(list)
+    highs_by_hour = defaultdict(list)
+    highs_by_day = defaultdict(list)
+    highs_by_day_hour = defaultdict(list)
+    
+    # Track weekly patterns (week number for trending)
+    lows_by_week = defaultdict(int)
+    highs_by_week = defaultdict(int)
+    tir_by_week = defaultdict(lambda: {"in_range": 0, "total": 0})
+    
+    for sgv, date_ms, ds in rows:
+        try:
+            dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            week_num = dt.isocalendar()[1]
+            
+            # Track time in range by week for trend analysis
+            tir_by_week[week_num]["total"] += 1
+            if t["target_low"] <= sgv <= t["target_high"]:
+                tir_by_week[week_num]["in_range"] += 1
+            
+            # Track low events
+            if sgv < t["target_low"]:
+                lows_by_hour[dt.hour].append((sgv, dt))
+                lows_by_day[dt.weekday()].append((sgv, dt))
+                lows_by_day_hour[(dt.weekday(), dt.hour)].append((sgv, dt))
+                lows_by_week[week_num] += 1
+            
+            # Track high events  
+            elif sgv > t["target_high"]:
+                highs_by_hour[dt.hour].append((sgv, dt))
+                highs_by_day[dt.weekday()].append((sgv, dt))
+                highs_by_day_hour[(dt.weekday(), dt.hour)].append((sgv, dt))
+                highs_by_week[week_num] += 1
+        except (ValueError, TypeError):
+            pass
+    
+    alerts = []
+    
+    # Detect recurring low patterns by time of day
+    for hour, events in lows_by_hour.items():
+        if len(events) >= min_occurrences:
+            # Count unique days to avoid counting multiple lows on same day
+            unique_days = len(set(dt.date() for _, dt in events))
+            if unique_days >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                alerts.append({
+                    "severity": "high" if unique_days >= 3 else "medium",
+                    "category": "recurring_lows",
+                    "pattern": f"time_of_day",
+                    "message": f"You've had {unique_days} lows around {hour:02d}:00 in the last {days} days",
+                    "details": {
+                        "hour": hour,
+                        "occurrences": len(events),
+                        "unique_days": unique_days,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Detect recurring low patterns by day of week
+    for day, events in lows_by_day.items():
+        if len(events) >= min_occurrences:
+            unique_weeks = len(set((dt.isocalendar()[0], dt.isocalendar()[1]) for _, dt in events))
+            if unique_weeks >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                alerts.append({
+                    "severity": "medium",
+                    "category": "recurring_lows",
+                    "pattern": "day_of_week",
+                    "message": f"{day_names[day]}s tend to have lows ({len(events)} events over {unique_weeks} weeks)",
+                    "details": {
+                        "day": day_names[day],
+                        "occurrences": len(events),
+                        "unique_weeks": unique_weeks,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Detect recurring high patterns by time of day
+    for hour, events in highs_by_hour.items():
+        if len(events) >= min_occurrences:
+            unique_days = len(set(dt.date() for _, dt in events))
+            if unique_days >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                alerts.append({
+                    "severity": "medium",
+                    "category": "recurring_highs",
+                    "pattern": "time_of_day",
+                    "message": f"Consistently high around {hour:02d}:00 ({unique_days} days in the last {days} days)",
+                    "details": {
+                        "hour": hour,
+                        "occurrences": len(events),
+                        "unique_days": unique_days,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Detect recurring high patterns by day of week
+    for day, events in highs_by_day.items():
+        if len(events) >= min_occurrences:
+            unique_weeks = len(set((dt.isocalendar()[0], dt.isocalendar()[1]) for _, dt in events))
+            if unique_weeks >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                alerts.append({
+                    "severity": "medium",
+                    "category": "recurring_highs",
+                    "pattern": "day_of_week",
+                    "message": f"{day_names[day]}s are consistently high ({len(events)} events over {unique_weeks} weeks)",
+                    "details": {
+                        "day": day_names[day],
+                        "occurrences": len(events),
+                        "unique_weeks": unique_weeks,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Detect specific day+hour combinations (e.g., "Friday lunches are consistently high")
+    for (day, hour), events in highs_by_day_hour.items():
+        if len(events) >= min_occurrences:
+            unique_weeks = len(set((dt.isocalendar()[0], dt.isocalendar()[1]) for _, dt in events))
+            if unique_weeks >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                time_label = "lunch" if 11 <= hour <= 14 else "dinner" if 17 <= hour <= 20 else "breakfast" if 6 <= hour <= 9 else f"{hour:02d}:00"
+                alerts.append({
+                    "severity": "medium",
+                    "category": "recurring_highs",
+                    "pattern": "day_hour_combination",
+                    "message": f"{day_names[day]} {time_label} is consistently high",
+                    "details": {
+                        "day": day_names[day],
+                        "hour": hour,
+                        "time_label": time_label,
+                        "occurrences": len(events),
+                        "unique_weeks": unique_weeks,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Similar for low patterns at specific day+hour
+    for (day, hour), events in lows_by_day_hour.items():
+        if len(events) >= min_occurrences:
+            unique_weeks = len(set((dt.isocalendar()[0], dt.isocalendar()[1]) for _, dt in events))
+            if unique_weeks >= min_occurrences:
+                avg_glucose = sum(sgv for sgv, _ in events) / len(events)
+                time_label = "lunch" if 11 <= hour <= 14 else "dinner" if 17 <= hour <= 20 else "breakfast" if 6 <= hour <= 9 else "overnight" if hour < 6 or hour >= 22 else f"{hour:02d}:00"
+                
+                # Overnight lows are particularly concerning
+                severity = "high" if (hour < 6 or hour >= 22) else "medium"
+                alerts.append({
+                    "severity": severity,
+                    "category": "recurring_lows",
+                    "pattern": "day_hour_combination",
+                    "message": f"{day_names[day]} {time_label} has recurring lows",
+                    "details": {
+                        "day": day_names[day],
+                        "hour": hour,
+                        "time_label": time_label,
+                        "occurrences": len(events),
+                        "unique_weeks": unique_weeks,
+                        "avg_glucose": convert_glucose(round(avg_glucose, 0)),
+                        "unit": get_unit_label()
+                    }
+                })
+    
+    # Detect improving/worsening trends in TIR
+    if len(tir_by_week) >= 3:
+        sorted_weeks = sorted(tir_by_week.keys())
+        recent_weeks = sorted_weeks[-3:]  # Last 3 weeks
+        older_weeks = sorted_weeks[-6:-3] if len(sorted_weeks) >= 6 else sorted_weeks[:-3]
+        
+        if older_weeks:
+            recent_tir = sum(tir_by_week[w]["in_range"] / tir_by_week[w]["total"] * 100 
+                           for w in recent_weeks) / len(recent_weeks)
+            older_tir = sum(tir_by_week[w]["in_range"] / tir_by_week[w]["total"] * 100 
+                          for w in older_weeks) / len(older_weeks)
+            
+            change = recent_tir - older_tir
+            
+            if abs(change) >= 5:  # 5% change is significant
+                if change > 0:
+                    alerts.append({
+                        "severity": "low",
+                        "category": "trend_improvement",
+                        "pattern": "time_in_range_trend",
+                        "message": f"Your control has improved {abs(change):.1f}% in recent weeks",
+                        "details": {
+                            "recent_tir": round(recent_tir, 1),
+                            "older_tir": round(older_tir, 1),
+                            "change": round(change, 1)
+                        }
+                    })
+                else:
+                    alerts.append({
+                        "severity": "medium",
+                        "category": "trend_worsening",
+                        "pattern": "time_in_range_trend",
+                        "message": f"Your control has declined {abs(change):.1f}% in recent weeks",
+                        "details": {
+                            "recent_tir": round(recent_tir, 1),
+                            "older_tir": round(older_tir, 1),
+                            "change": round(change, 1)
+                        }
+                    })
+    
+    # Sort alerts by severity (high > medium > low)
+    severity_order = {"high": 0, "medium": 1, "low": 2}
+    alerts.sort(key=lambda x: severity_order.get(x["severity"], 99))
+    
+    return {
+        "days_analyzed": days,
+        "alert_count": len(alerts),
+        "alerts": alerts,
+        "thresholds": {
+            "min_occurrences": min_occurrences,
+            "target_low": convert_glucose(t["target_low"]),
+            "target_high": convert_glucose(t["target_high"]),
+            "unit": get_unit_label()
+        }
+    }
+
+
 def parse_date_arg(date_str):
     """Parse a date argument like 'today', 'yesterday', '2026-01-16', or 'Jan 16'."""
     date_str = date_str.lower().strip()
@@ -1452,6 +1711,12 @@ def generate_html_report(days=90, output_path=None):
     last_date = rows[-1][2][:10] if rows[-1][2] else "unknown"
     
     # =========================================================================
+    # Detect Trend Alerts
+    # =========================================================================
+    alerts_result = detect_trend_alerts(days, min_occurrences=2)
+    alerts = alerts_result.get("alerts", []) if "error" not in alerts_result else []
+    
+    # =========================================================================
     # HTML Template with embedded Chart.js
     # =========================================================================
     
@@ -1628,6 +1893,86 @@ def generate_html_report(days=90, output_path=None):
         .stat-card.tir .value { color: var(--in-range); }
         .stat-card.gmi .value { color: var(--info); }
         .stat-card.cv .value { color: var(--warning); }
+        
+        .alerts-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .alerts-section h2 {
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .alerts-section h2::before {
+            content: '⚠️';
+            font-size: 1.5rem;
+        }
+        
+        .alerts-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .alert-item {
+            background: var(--bg-card);
+            border-left: 4px solid;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            align-items: start;
+            gap: 12px;
+        }
+        
+        .alert-item.severity-high {
+            border-left-color: var(--danger);
+        }
+        
+        .alert-item.severity-medium {
+            border-left-color: var(--warning);
+        }
+        
+        .alert-item.severity-low {
+            border-left-color: var(--info);
+        }
+        
+        .alert-icon {
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+        
+        .alert-content {
+            flex: 1;
+        }
+        
+        .alert-message {
+            font-size: 1rem;
+            color: var(--text-primary);
+            margin-bottom: 5px;
+        }
+        
+        .alert-details {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        
+        .no-alerts {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+        }
+        
+        .no-alerts-icon {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            color: var(--success);
+        }
         
         .chart-section {
             background: var(--bg-secondary);
@@ -1858,6 +2203,14 @@ def generate_html_report(days=90, output_path=None):
             </div>
         </div>
         
+        <!-- Trend Alerts -->
+        <div class="alerts-section" id="alertsSection">
+            <h2>Trend Alerts</h2>
+            <div class="alerts-container" id="alertsContainer">
+                <!-- Alerts will be rendered here by JavaScript -->
+            </div>
+        </div>
+        
         <!-- Time in Range Pie Chart -->
         <div class="chart-section">
             <h2>Time in Range Distribution</h2>
@@ -1953,6 +2306,9 @@ def generate_html_report(days=90, output_path=None):
         };
         const unit = '%(unit)s';
         const isMMOL = %(is_mmol_js)s;
+        
+        // Alerts data from Python
+        const allAlerts = %(alerts_json)s;
         
         // Current filter state
         let currentDays = %(initial_days)s;
@@ -2770,6 +3126,65 @@ def generate_html_report(days=90, output_path=None):
         
         // Initialize date controls
         initDateControls();
+        
+        // Render alerts
+        renderAlerts();
+        
+        // Function to render alerts
+        function renderAlerts() {
+            const container = document.getElementById('alertsContainer');
+            const section = document.getElementById('alertsSection');
+            
+            if (!allAlerts || allAlerts.length === 0) {
+                container.innerHTML = `
+                    <div class="no-alerts">
+                        <div class="no-alerts-icon">✅</div>
+                        <div>No concerning patterns detected. Great job!</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            const alertHTML = allAlerts.map(alert => {
+                const icon = alert.severity === 'high' ? '🔴' : 
+                           alert.severity === 'medium' ? '🟡' : '🔵';
+                
+                return `
+                    <div class="alert-item severity-${alert.severity}">
+                        <div class="alert-icon">${icon}</div>
+                        <div class="alert-content">
+                            <div class="alert-message">${alert.message}</div>
+                            <div class="alert-details">${formatAlertDetails(alert)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = alertHTML;
+        }
+        
+        function formatAlertDetails(alert) {
+            const details = alert.details;
+            let parts = [];
+            
+            if (details.occurrences) {
+                parts.push(`${details.occurrences} occurrences`);
+            }
+            if (details.unique_days) {
+                parts.push(`${details.unique_days} different days`);
+            }
+            if (details.unique_weeks) {
+                parts.push(`${details.unique_weeks} different weeks`);
+            }
+            if (details.avg_glucose) {
+                parts.push(`avg: ${details.avg_glucose} ${details.unit}`);
+            }
+            if (details.recent_tir !== undefined && details.older_tir !== undefined) {
+                parts.push(`recent TIR: ${details.recent_tir}%, previous: ${details.older_tir}%`);
+            }
+            
+            return parts.join(' • ');
+        }
     </script>
 </body>
 </html>
@@ -2817,7 +3232,8 @@ def generate_html_report(days=90, output_path=None):
         "generated_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "all_readings_json": json.dumps(all_readings_data),
         "is_mmol_js": "true" if is_mmol else "false",
-        "initial_days": days
+        "initial_days": days,
+        "alerts_json": json.dumps(alerts)
     }
     
     # Determine output path
@@ -2892,6 +3308,19 @@ def main():
     patterns_parser.add_argument(
         "--days", type=int, default=90,
         help="Number of days to analyze (default: 90)"
+    )
+
+    # Alerts command - detect concerning recurring patterns
+    alerts_parser = subparsers.add_parser(
+        "alerts", help="Show trend alerts for concerning patterns (recurring lows/highs)"
+    )
+    alerts_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to analyze (default: 90)"
+    )
+    alerts_parser.add_argument(
+        "--min-occurrences", type=int, default=2,
+        help="Minimum occurrences to trigger alert (default: 2)"
     )
 
     # Day command - view readings for a specific date
@@ -3014,6 +3443,8 @@ def main():
         )
     elif args.command == "patterns":
         result = find_patterns(args.days)
+    elif args.command == "alerts":
+        result = detect_trend_alerts(args.days, args.min_occurrences)
     elif args.command == "day":
         result = view_day(
             args.date,
