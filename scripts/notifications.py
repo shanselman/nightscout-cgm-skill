@@ -248,11 +248,12 @@ class PatternDetector:
         # Need at least 80% of readings to be high
         if total_count > 0 and (high_count / total_count) >= 0.8:
             avg_glucose = sum(r["sgv"] for r in readings[:total_count]) / total_count
+            hours_text = "Hour" if hours == 1 else "Hours"
             return {
                 "type": "prolonged_high",
                 "level": "warning",
-                "title": f"High Glucose for {hours} Hours",
-                "message": f"Your glucose has been above {threshold} mg/dL for approximately {hours} hours. Average: {avg_glucose:.0f} mg/dL",
+                "title": f"High Glucose for {hours} {hours_text}",
+                "message": f"Your glucose has been above {threshold} mg/dL for approximately {hours} {hours_text.lower()}. Average: {avg_glucose:.0f} mg/dL",
                 "data": {
                     "hours": hours,
                     "threshold": threshold,

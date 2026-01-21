@@ -3,7 +3,7 @@ Tests for notification system.
 """
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, mock_open
 
@@ -73,7 +73,6 @@ class TestNotificationConfig:
         config.config["quiet_hours"]["end"] = "07:00"
         
         # Mock current time to 23:00
-        from datetime import time
         with patch("notifications.datetime") as mock_dt:
             mock_dt.now.return_value.time.return_value = time(23, 0)
             assert config.is_quiet_hours() is True
@@ -86,7 +85,6 @@ class TestNotificationConfig:
         config.config["quiet_hours"]["end"] = "07:00"
         
         # Mock current time to 10:00 (outside quiet hours)
-        from datetime import time
         with patch("notifications.datetime") as mock_dt:
             mock_dt.now.return_value.time.return_value = time(10, 0)
             assert config.is_quiet_hours() is False
@@ -120,7 +118,6 @@ class TestNotificationManager:
         
         manager = notifications.NotificationManager(config)
         
-        from datetime import time
         with patch("notifications.datetime") as mock_dt:
             mock_dt.now.return_value.time.return_value = time(23, 0)
             # Should not send
@@ -139,7 +136,6 @@ class TestNotificationManager:
         
         manager = notifications.NotificationManager(config)
         
-        from datetime import time
         with patch("notifications.datetime") as mock_dt:
             mock_dt.now.return_value.time.return_value = time(23, 0)
             # Should send urgent even during quiet hours

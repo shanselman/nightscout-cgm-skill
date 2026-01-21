@@ -3219,10 +3219,6 @@ def main():
         "--end", type=str,
         help="Quiet hours end time (HH:MM format, e.g., 07:00)"
     )
-    config_parser.add_argument(
-        "--quiet-hours-enabled", type=bool,
-        help="Enable or disable quiet hours"
-    )
 
     # Weekly summary command
     summary_parser = subparsers.add_parser(
@@ -3305,8 +3301,6 @@ def main():
             kwargs["start"] = args.start
         if args.end:
             kwargs["end"] = args.end
-        if args.quiet_hours_enabled is not None:
-            kwargs["enabled"] = args.quiet_hours_enabled
         result = configure_notifications(args.action, **kwargs)
     elif args.command == "weekly-summary":
         result = generate_weekly_summary_notification()
