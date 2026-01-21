@@ -100,8 +100,14 @@ def get_thresholds():
         "urgent_high": thresholds.get("bgHigh", 250),
     }
 
-SKILL_DIR= Path(__file__).parent.parent
+SKILL_DIR = Path(__file__).parent.parent
 DB_PATH = SKILL_DIR / "cgm_data.db"
+
+# Trend alert detection thresholds
+HIGH_SEVERITY_DAY_THRESHOLD = 3  # Number of unique days to trigger high severity
+SIGNIFICANT_TIR_CHANGE = 5  # Percentage change in TIR to be considered significant
+OVERNIGHT_START_HOUR = 22  # Hour when overnight period begins
+OVERNIGHT_END_HOUR = 6  # Hour when overnight period ends
 
 
 def create_database():
@@ -1108,7 +1114,7 @@ def detect_trend_alerts(days=90, min_occurrences=2):
             if unique_days >= min_occurrences:
                 avg_glucose = sum(sgv for sgv, _ in events) / len(events)
                 alerts.append({
-                    "severity": "high" if unique_days >= 3 else "medium",
+                    "severity": "high" if unique_days >= HIGH_SEVERITY_DAY_THRESHOLD else "medium",
                     "category": "recurring_lows",
                     "pattern": f"time_of_day",
                     "message": f"You've had {unique_days} lows around {hour:02d}:00 in the last {days} days",
@@ -1210,10 +1216,10 @@ def detect_trend_alerts(days=90, min_occurrences=2):
             unique_weeks = len(set((dt.isocalendar()[0], dt.isocalendar()[1]) for _, dt in events))
             if unique_weeks >= min_occurrences:
                 avg_glucose = sum(sgv for sgv, _ in events) / len(events)
-                time_label = "lunch" if 11 <= hour <= 14 else "dinner" if 17 <= hour <= 20 else "breakfast" if 6 <= hour <= 9 else "overnight" if hour < 6 or hour >= 22 else f"{hour:02d}:00"
+                time_label = "lunch" if 11 <= hour <= 14 else "dinner" if 17 <= hour <= 20 else "breakfast" if 6 <= hour <= 9 else "overnight" if hour < OVERNIGHT_END_HOUR or hour >= OVERNIGHT_START_HOUR else f"{hour:02d}:00"
                 
                 # Overnight lows are particularly concerning
-                severity = "high" if (hour < 6 or hour >= 22) else "medium"
+                severity = "high" if (hour < OVERNIGHT_END_HOUR or hour >= OVERNIGHT_START_HOUR) else "medium"
                 alerts.append({
                     "severity": severity,
                     "category": "recurring_lows",
@@ -1244,7 +1250,7 @@ def detect_trend_alerts(days=90, min_occurrences=2):
             
             change = recent_tir - older_tir
             
-            if abs(change) >= 5:  # 5% change is significant
+            if abs(change) >= SIGNIFICANT_TIR_CHANGE:  # Significant change threshold
                 if change > 0:
                     alerts.append({
                         "severity": "low",
