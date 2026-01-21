@@ -298,6 +298,287 @@ def analyze_cgm(days=90):
     }
 
 
+def parse_period(period_str):
+    """
+    Parse a period string like 'last 7 days', 'previous 7 days', 'this week', 'last week', etc.
+    Returns a tuple of (start_date, end_date, description).
+    """
+    period_str = period_str.lower().strip()
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    
+    # Handle relative day ranges
+    if "last" in period_str and "days" in period_str:
+        # Extract number: 'last 7 days', 'last 30 days'
+        import re
+        match = re.search(r'(\d+)\s*days?', period_str)
+        if match:
+            days = int(match.group(1))
+            end_date = now
+            start_date = now - timedelta(days=days)
+            return (start_date, end_date, f"Last {days} days")
+    
+    if "previous" in period_str and "days" in period_str:
+        # 'previous 7 days' means the 7 days before the last 7 days
+        import re
+        match = re.search(r'(\d+)\s*days?', period_str)
+        if match:
+            days = int(match.group(1))
+            end_date = now - timedelta(days=days)
+            start_date = end_date - timedelta(days=days)
+            return (start_date, end_date, f"Previous {days} days")
+    
+    # Handle weeks
+    if period_str in ["this week", "current week"]:
+        # Week starts on Monday (0)
+        days_since_monday = today.weekday()
+        start_date = datetime.combine(today - timedelta(days=days_since_monday), datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_date = now
+        return (start_date, end_date, "This week")
+    
+    if period_str in ["last week", "previous week"]:
+        days_since_monday = today.weekday()
+        this_monday = today - timedelta(days=days_since_monday)
+        last_monday = this_monday - timedelta(days=7)
+        start_date = datetime.combine(last_monday, datetime.min.time()).replace(tzinfo=timezone.utc)
+        end_date = datetime.combine(this_monday, datetime.min.time()).replace(tzinfo=timezone.utc)
+        return (start_date, end_date, "Last week")
+    
+    # Handle months
+    if period_str in ["this month", "current month"]:
+        start_date = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        end_date = now
+        return (start_date, end_date, f"{now.strftime('%B %Y')}")
+    
+    if period_str in ["last month", "previous month"]:
+        if now.month == 1:
+            last_month = 12
+            year = now.year - 1
+        else:
+            last_month = now.month - 1
+            year = now.year
+        start_date = datetime(year, last_month, 1, tzinfo=timezone.utc)
+        # End is first day of current month
+        end_date = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        return (start_date, end_date, datetime(year, last_month, 1).strftime('%B %Y'))
+    
+    # Handle specific months by name
+    month_names = ["january", "february", "march", "april", "may", "june",
+                   "july", "august", "september", "october", "november", "december"]
+    for i, month_name in enumerate(month_names, 1):
+        if month_name in period_str:
+            year = now.year
+            # Check if year is specified in the string
+            import re
+            year_match = re.search(r'\b(20\d{2})\b', period_str)
+            if year_match:
+                year = int(year_match.group(1))
+            
+            start_date = datetime(year, i, 1, tzinfo=timezone.utc)
+            # End date is first day of next month
+            if i == 12:
+                end_date = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+            else:
+                end_date = datetime(year, i + 1, 1, tzinfo=timezone.utc)
+            return (start_date, end_date, datetime(year, i, 1).strftime('%B %Y'))
+    
+    # Handle "N days ago"
+    if "days ago" in period_str:
+        import re
+        match = re.search(r'(\d+)\s*days?\s+ago', period_str)
+        if match:
+            days_ago = int(match.group(1))
+            # This refers to a single point in time, but we'll treat it as a period
+            # Default to analyzing 7 days starting from that point
+            end_date = now - timedelta(days=days_ago)
+            start_date = end_date - timedelta(days=7)
+            return (start_date, end_date, f"{days_ago} days ago (7-day period)")
+    
+    raise ValueError(f"Could not parse period: '{period_str}'. Try formats like 'last 7 days', 'previous 7 days', 'this week', 'last week', 'January', 'last month', etc.")
+
+
+def compare_periods(period1_str, period2_str):
+    """
+    Compare two time periods side-by-side.
+    Returns statistics and deltas for both periods.
+    
+    Args:
+        period1_str: Description of first period (e.g., 'last 7 days')
+        period2_str: Description of second period (e.g., 'previous 7 days')
+    """
+    try:
+        start1, end1, desc1 = parse_period(period1_str)
+        start2, end2, desc2 = parse_period(period2_str)
+    except ValueError as e:
+        return {"error": str(e)}
+    
+    # Fetch data for both periods
+    if not ensure_data(max(90, (datetime.now(timezone.utc) - start1).days, (datetime.now(timezone.utc) - start2).days)):
+        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+    
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Helper function to get data for a period
+    def get_period_data(start_dt, end_dt):
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(end_dt.timestamp() * 1000)
+        
+        rows = conn.execute(
+            "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND date_ms < ? AND sgv > 0 ORDER BY date_ms",
+            (start_ms, end_ms)
+        ).fetchall()
+        
+        if not rows:
+            return None
+        
+        values = [r[0] for r in rows]
+        stats = get_stats(values)
+        tir = get_time_in_range(values)
+        
+        # GMI calculation
+        raw_mean = sum(values) / len(values)
+        gmi = round(3.31 + (0.02392 * raw_mean), 1)
+        
+        # CV calculation
+        raw_std = (sum((x - raw_mean) ** 2 for x in values) / len(values)) ** 0.5
+        cv = round((raw_std / raw_mean) * 100, 1) if raw_mean else 0
+        
+        return {
+            "date_range": {
+                "from": start_dt.strftime("%Y-%m-%d"),
+                "to": end_dt.strftime("%Y-%m-%d"),
+                "description": desc1 if start_dt == start1 else desc2
+            },
+            "readings": len(values),
+            "statistics": stats,
+            "time_in_range": tir,
+            "gmi_estimated_a1c": gmi,
+            "cv_variability": cv,
+            "cv_status": "stable" if cv < 36 else "high variability"
+        }
+    
+    period1_data = get_period_data(start1, end1)
+    period2_data = get_period_data(start2, end2)
+    
+    conn.close()
+    
+    if not period1_data:
+        return {"error": f"No data found for period 1: {desc1}"}
+    if not period2_data:
+        return {"error": f"No data found for period 2: {desc2}"}
+    
+    # Calculate deltas (period1 - period2)
+    def calculate_delta(val1, val2, is_percentage=False):
+        """Calculate delta and format appropriately."""
+        if val1 is None or val2 is None:
+            return None
+        delta = val1 - val2
+        return {
+            "value": round(delta, 1),
+            "change": "improved" if delta < 0 and not is_percentage else "worsened" if delta > 0 and not is_percentage else "unchanged" if delta == 0 else "changed",
+            "percentage_change": round((delta / val2 * 100), 1) if val2 != 0 else None
+        }
+    
+    def calculate_tir_delta(val1, val2):
+        """Calculate delta for TIR (higher is better)."""
+        if val1 is None or val2 is None:
+            return None
+        delta = val1 - val2
+        return {
+            "value": round(delta, 1),
+            "change": "improved" if delta > 0 else "worsened" if delta < 0 else "unchanged",
+            "percentage_points": round(delta, 1)
+        }
+    
+    deltas = {
+        "average_glucose": calculate_delta(
+            period1_data["statistics"]["mean"],
+            period2_data["statistics"]["mean"]
+        ),
+        "time_in_range": calculate_tir_delta(
+            period1_data["time_in_range"]["in_range_pct"],
+            period2_data["time_in_range"]["in_range_pct"]
+        ),
+        "gmi_estimated_a1c": calculate_delta(
+            period1_data["gmi_estimated_a1c"],
+            period2_data["gmi_estimated_a1c"]
+        ),
+        "cv_variability": calculate_delta(
+            period1_data["cv_variability"],
+            period2_data["cv_variability"]
+        ),
+        "very_low_pct": calculate_tir_delta(
+            -period1_data["time_in_range"]["very_low_pct"],
+            -period2_data["time_in_range"]["very_low_pct"]
+        ),
+        "low_pct": calculate_tir_delta(
+            -period1_data["time_in_range"]["low_pct"],
+            -period2_data["time_in_range"]["low_pct"]
+        ),
+        "high_pct": calculate_tir_delta(
+            -period1_data["time_in_range"]["high_pct"],
+            -period2_data["time_in_range"]["high_pct"]
+        ),
+        "very_high_pct": calculate_tir_delta(
+            -period1_data["time_in_range"]["very_high_pct"],
+            -period2_data["time_in_range"]["very_high_pct"]
+        )
+    }
+    
+    return {
+        "comparison": {
+            "period1": period1_data,
+            "period2": period2_data
+        },
+        "deltas": deltas,
+        "unit": get_unit_label(),
+        "summary": {
+            "period1_description": desc1,
+            "period2_description": desc2,
+            "key_improvements": _identify_improvements(deltas),
+            "key_regressions": _identify_regressions(deltas)
+        }
+    }
+
+
+def _identify_improvements(deltas):
+    """Identify key improvements from deltas."""
+    improvements = []
+    
+    if deltas["time_in_range"] and deltas["time_in_range"]["change"] == "improved":
+        improvements.append(f"Time in range increased by {deltas['time_in_range']['percentage_points']} percentage points")
+    
+    if deltas["gmi_estimated_a1c"] and deltas["gmi_estimated_a1c"]["value"] < -0.1:
+        improvements.append(f"GMI (estimated A1C) decreased by {abs(deltas['gmi_estimated_a1c']['value'])}")
+    
+    if deltas["cv_variability"] and deltas["cv_variability"]["value"] < -2:
+        improvements.append(f"Glucose variability (CV) decreased by {abs(deltas['cv_variability']['value'])}%")
+    
+    if deltas["very_low_pct"] and deltas["very_low_pct"]["change"] == "improved":
+        improvements.append(f"Very low events decreased")
+    
+    return improvements if improvements else ["No significant improvements"]
+
+
+def _identify_regressions(deltas):
+    """Identify key regressions from deltas."""
+    regressions = []
+    
+    if deltas["time_in_range"] and deltas["time_in_range"]["change"] == "worsened":
+        regressions.append(f"Time in range decreased by {abs(deltas['time_in_range']['percentage_points'])} percentage points")
+    
+    if deltas["gmi_estimated_a1c"] and deltas["gmi_estimated_a1c"]["value"] > 0.1:
+        regressions.append(f"GMI (estimated A1C) increased by {deltas['gmi_estimated_a1c']['value']}")
+    
+    if deltas["cv_variability"] and deltas["cv_variability"]["value"] > 2:
+        regressions.append(f"Glucose variability (CV) increased by {deltas['cv_variability']['value']}%")
+    
+    if deltas["very_high_pct"] and deltas["very_high_pct"]["change"] == "worsened":
+        regressions.append(f"Very high events increased")
+    
+    return regressions if regressions else ["No significant regressions"]
+
+
 def get_current_glucose():
     """Get the most recent glucose reading from Nightscout."""
     try:
@@ -3760,6 +4041,19 @@ def main():
         help="Open the report in default browser after generating"
     )
 
+    # Compare command - compare two time periods
+    compare_parser = subparsers.add_parser(
+        "compare", help="Compare two time periods to track progress or identify changes"
+    )
+    compare_parser.add_argument(
+        "--period1", type=str, required=True,
+        help="First period to compare (e.g., 'last 7 days', 'this week', 'January')"
+    )
+    compare_parser.add_argument(
+        "--period2", type=str, required=True,
+        help="Second period to compare (e.g., 'previous 7 days', 'last week', 'December')"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -3828,6 +4122,8 @@ def main():
             if args.open:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
+    elif args.command == "compare":
+        result = compare_periods(args.period1, args.period2)
     else:
         parser.print_help()
         sys.exit(1)
