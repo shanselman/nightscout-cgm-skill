@@ -79,17 +79,29 @@ def _normalize_nightscout_url(url):
     """Normalize NIGHTSCOUT_URL to always point to /api/v1/entries.json"""
     if not url:
         return None
-    url = url.rstrip("/")
-    if url.endswith("/api/v1/entries.json"):
-        return url
-    if url.endswith("/api/v1/entries"):
-        return url + ".json"
-    if url.endswith("/api/v1"):
-        return url + "/entries.json"
-    if url.endswith("/api"):
-        return url + "/v1/entries.json"
+    
+    # Separate query parameters to check the path properly
+    if '?' in url:
+        base_url, query_string = url.split('?', 1)
+        query_params = '?' + query_string
+    else:
+        base_url = url
+        query_params = ''
+    
+    base_url = base_url.rstrip("/")
+    
+    # Check if already normalized
+    if base_url.endswith("/api/v1/entries.json"):
+        return base_url + query_params
+    if base_url.endswith("/api/v1/entries"):
+        return base_url + ".json" + query_params
+    if base_url.endswith("/api/v1"):
+        return base_url + "/entries.json" + query_params
+    if base_url.endswith("/api"):
+        return base_url + "/v1/entries.json" + query_params
+    
     # Just the domain
-    return url + "/api/v1/entries.json"
+    return base_url + "/api/v1/entries.json" + query_params
 
 def get_api_base():
     """Get API base URL for the active profile."""
