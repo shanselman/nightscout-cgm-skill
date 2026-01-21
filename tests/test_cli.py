@@ -70,6 +70,30 @@ class TestMainArgumentParsing:
                         pass
                     mock_patterns.assert_called_once()
     
+    def test_ml_insights_command(self, cgm_module):
+        """'ml-insights' command should work."""
+        with patch.object(cgm_module, "find_ml_patterns") as mock_ml:
+            mock_ml.return_value = {"insights": [], "summary": "ML analysis"}
+            with patch.object(sys, "argv", ["cgm.py", "ml-insights"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_ml.assert_called_once()
+    
+    def test_ml_insights_with_days(self, cgm_module):
+        """'ml-insights --days N' should pass days parameter."""
+        with patch.object(cgm_module, "find_ml_patterns") as mock_ml:
+            mock_ml.return_value = {"insights": [], "summary": "ML analysis"}
+            with patch.object(sys, "argv", ["cgm.py", "ml-insights", "--days", "60"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_ml.assert_called_once_with(60)
+    
     def test_query_command(self, cgm_module):
         """'query' command should work."""
         with patch.object(cgm_module, "query_patterns") as mock_query:

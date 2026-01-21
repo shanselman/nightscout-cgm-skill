@@ -23,6 +23,13 @@ except ImportError:
     print("Error: requests library required. Install with: pip install requests")
     sys.exit(1)
 
+# Import ML pattern detection module
+try:
+    from ml_patterns import generate_ml_insights
+except ImportError:
+    # ML patterns module optional - will show error if ml-insights command is used
+    generate_ml_insights = None
+
 # Configuration - Set NIGHTSCOUT_URL environment variable to your Nightscout API endpoint
 _raw_url = os.environ.get("NIGHTSCOUT_URL")
 if not _raw_url:
@@ -1026,6 +1033,45 @@ def find_patterns(days=90):
         },
         "unit": get_unit_label()
     }
+
+
+def find_ml_patterns(days=90):
+    """
+    Use machine learning to find non-obvious patterns and correlations.
+    Includes time-based clustering, day-of-week correlations, and anomaly detection.
+    All processing stays local - privacy-first.
+    """
+    if generate_ml_insights is None:
+        return {
+            "error": "ML pattern detection requires scikit-learn. Install with: pip install scikit-learn numpy"
+        }
+    
+    if not ensure_data(days):
+        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return {"error": "No data found for the specified period."}
+    
+    t = get_thresholds()
+    
+    # Generate ML insights
+    ml_results = generate_ml_insights(rows, t)
+    
+    # Add metadata
+    ml_results["days_analyzed"] = days
+    ml_results["unit"] = get_unit_label()
+    
+    return ml_results
 
 
 def parse_date_arg(date_str):
@@ -2894,6 +2940,15 @@ def main():
         help="Number of days to analyze (default: 90)"
     )
 
+    # ML insights command - machine learning pattern detection
+    ml_parser = subparsers.add_parser(
+        "ml-insights", help="Machine learning pattern detection (clustering, correlations, anomalies)"
+    )
+    ml_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Number of days to analyze (default: 90)"
+    )
+
     # Day command - view readings for a specific date
     day_parser = subparsers.add_parser(
         "day", help="View all readings for a specific date (e.g., today, yesterday, 2026-01-16)"
@@ -3014,6 +3069,8 @@ def main():
         )
     elif args.command == "patterns":
         result = find_patterns(args.days)
+    elif args.command == "ml-insights":
+        result = find_ml_patterns(args.days)
     elif args.command == "day":
         result = view_day(
             args.date,

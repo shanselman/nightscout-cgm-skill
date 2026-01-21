@@ -14,6 +14,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
+- **ML Pattern Detection** - Machine learning to discover non-obvious patterns and correlations
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
@@ -66,6 +67,7 @@ Just ask naturally:
 "What's my current glucose?"
 "Generate a report of my last 90 days"
 "What patterns do you see in my data?"
+"Use machine learning to find hidden patterns in my glucose data"
 "What's happening on Tuesdays after lunch?"
 "When do I tend to go low?"
 "Show me a sparkline of my last 24 hours"
@@ -73,6 +75,7 @@ Just ask naturally:
 "What does Saturday look like?"
 "What was my worst lunch this week?"
 "Show me what happened yesterday during dinner"
+"Detect any unusual days in my data"
 ```
 
 Or use the CLI directly:
@@ -148,6 +151,7 @@ The skill simply runs a local Python script and returns text output. Your health
 
 - Python 3.8+
 - `requests` library (`pip install requests`)
+- For ML pattern detection: `scikit-learn` and `numpy` (`pip install scikit-learn numpy`)
 - A [Nightscout](http://www.nightscout.info/) instance with API access
 
 ## Installation
@@ -174,6 +178,9 @@ git clone https://github.com/shanselman/nightscout-cgm-skill .github/skills/nigh
 
 ```bash
 pip install requests
+
+# For ML pattern detection (optional)
+pip install scikit-learn numpy
 ```
 
 ## Configuration
@@ -268,6 +275,9 @@ python scripts/cgm.py analyze --days 30
 
 # Find patterns automatically (best/worst times, problem areas)
 python scripts/cgm.py patterns
+
+# Machine learning pattern detection (clustering, correlations, anomalies)
+python scripts/cgm.py ml-insights --days 90
 
 # View all readings for a specific date
 python scripts/cgm.py day yesterday
