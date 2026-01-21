@@ -64,11 +64,19 @@ Support family members with separate Nightscout instances.
 
 ## Data Science
 
-### 10. ML Pattern Detection
+### 10. ML Pattern Detection ✅ IMPLEMENTED
 Machine learning to find non-obvious patterns.
 - "You tend to go high 3 hours after meals over 50g carbs"
 - Day-of-week and time-of-day correlations
 - Predictive insights
+
+**Implementation:**
+- Uses scikit-learn for clustering, correlation analysis, and anomaly detection
+- K-means clustering to identify recurring time-based patterns
+- Statistical analysis for day-of-week correlations
+- Isolation Forest for anomaly detection
+- All processing stays local (privacy-first)
+- Available via `python scripts/cgm.py ml-insights` command
 
 ---
 
@@ -85,4 +93,4 @@ Machine learning to find non-obvious patterns.
 | 7 | Auto-refresh Daemon | [#10](https://github.com/shanselman/nightscout-cgm-skill/issues/10) | Planned |
 | 8 | Notification Integration | [#11](https://github.com/shanselman/nightscout-cgm-skill/issues/11) | Planned |
 | 9 | Multiple Profiles | [#12](https://github.com/shanselman/nightscout-cgm-skill/issues/12) | Planned |
-| 10 | ML Pattern Detection | [#13](https://github.com/shanselman/nightscout-cgm-skill/issues/13) | Planned |
+| 10 | ML Pattern Detection | [#13](https://github.com/shanselman/nightscout-cgm-skill/issues/13) | ✅ Implemented |
