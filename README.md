@@ -12,6 +12,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Background Daemon** - Auto-refresh data in the background with configurable sync intervals
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
@@ -216,6 +217,55 @@ Fetched 31123 readings. Total: 31123
 
 Data is cached locally in a SQLite database for fast queries. Run `refresh` periodically to pull in new readings, or just ask the AI to "refresh my CGM data".
 
+## Background Daemon
+
+Keep your CGM data automatically up-to-date with the background daemon. The daemon runs in the background and syncs data from Nightscout at regular intervals, so your data is always current without manual refresh.
+
+### Quick Start
+
+```bash
+# Start the daemon (default: sync every 5 minutes)
+python scripts/cgm.py daemon start
+
+# Check if daemon is running
+python scripts/cgm.py daemon status
+
+# Stop the daemon
+python scripts/cgm.py daemon stop
+```
+
+### Configuration
+
+Customize the sync interval and data retention:
+
+```bash
+# Sync every 10 minutes, fetch last 30 days
+python scripts/cgm.py daemon start --interval 10 --days 30
+
+# Sync every 2 minutes (for testing), fetch last 7 days
+python scripts/cgm.py daemon start --interval 2 --days 7
+```
+
+### Monitoring
+
+The daemon logs all sync activity to `cgm_daemon.log` in the skill directory:
+
+```bash
+# View daemon logs
+tail -f ~/.copilot/skills/nightscout-cgm/cgm_daemon.log
+```
+
+### How It Works
+
+- The daemon runs as a background process (fork on Linux/macOS)
+- PID is stored in `cgm_daemon.pid`
+- Configuration is saved in `cgm_daemon.conf`
+- Graceful shutdown with SIGTERM signal
+- Auto-cleanup of stale PID files
+- Low resource usage - only active during sync
+
+**Note:** The daemon is designed for Unix-like systems (Linux, macOS). Windows support requires WSL or manual task scheduler setup.
+
 ## Usage
 
 ### With AI Agents
@@ -314,6 +364,18 @@ python scripts/cgm.py report --days 90 --output ~/my_glucose_report.html
 
 # Refresh data from Nightscout
 python scripts/cgm.py refresh --days 90
+
+# Start background daemon to auto-refresh data every 5 minutes
+python scripts/cgm.py daemon start
+
+# Start daemon with custom interval (every 10 minutes)
+python scripts/cgm.py daemon start --interval 10 --days 30
+
+# Check daemon status
+python scripts/cgm.py daemon status
+
+# Stop background daemon
+python scripts/cgm.py daemon stop
 ```
 
 ### Standalone Terminal Usage

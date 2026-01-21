@@ -2955,6 +2955,13 @@ def get_daemon_status():
 
 def start_daemon(interval_minutes=None, days=None):
     """Start the daemon process."""
+    # Check if running on Windows
+    if sys.platform == "win32":
+        return {
+            "status": "error",
+            "message": "Daemon mode is not supported on Windows. Use Task Scheduler or run 'refresh' manually."
+        }
+    
     if is_daemon_running():
         return {
             "status": "error",
