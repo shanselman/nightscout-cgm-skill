@@ -10,10 +10,13 @@ Commands:
   daemon start/stop/status   Manage background sync daemon
 """
 import argparse
+import atexit
 import json
 import os
+import signal
 import sqlite3
 import sys
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -2843,10 +2846,6 @@ def generate_html_report(days=90, output_path=None):
 # ============================================================================
 # Daemon Management
 # ============================================================================
-
-import signal
-import time
-import atexit
 
 DAEMON_PID_FILE = SKILL_DIR / "cgm_daemon.pid"
 DAEMON_CONFIG_FILE = SKILL_DIR / "cgm_daemon.conf"
