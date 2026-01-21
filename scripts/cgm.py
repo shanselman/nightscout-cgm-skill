@@ -7,6 +7,7 @@ Commands:
   current              Get the latest glucose reading
   analyze [--days N]   Analyze CGM data (default: 90 days)
   refresh [--days N]   Fetch latest data from Nightscout and update local database
+  daemon start/stop/status   Manage background sync daemon
 """
 import argparse
 import json
@@ -2839,6 +2840,245 @@ def generate_html_report(days=90, output_path=None):
     }
 
 
+# ============================================================================
+# Daemon Management
+# ============================================================================
+
+import signal
+import time
+import atexit
+
+DAEMON_PID_FILE = SKILL_DIR / "cgm_daemon.pid"
+DAEMON_CONFIG_FILE = SKILL_DIR / "cgm_daemon.conf"
+DAEMON_LOG_FILE = SKILL_DIR / "cgm_daemon.log"
+
+# Default daemon configuration
+DEFAULT_DAEMON_CONFIG = {
+    "interval_minutes": 5,
+    "days_to_fetch": 90
+}
+
+
+def read_daemon_config():
+    """Read daemon configuration from file."""
+    if DAEMON_CONFIG_FILE.exists():
+        try:
+            with open(DAEMON_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                # Ensure defaults for missing keys
+                for key, value in DEFAULT_DAEMON_CONFIG.items():
+                    if key not in config:
+                        config[key] = value
+                return config
+        except (json.JSONDecodeError, IOError):
+            pass
+    return DEFAULT_DAEMON_CONFIG.copy()
+
+
+def write_daemon_config(config):
+    """Write daemon configuration to file."""
+    with open(DAEMON_CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+
+
+def log_daemon(message):
+    """Log daemon activity to file."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(DAEMON_LOG_FILE, 'a') as f:
+        f.write(f"[{timestamp}] {message}\n")
+
+
+def is_daemon_running():
+    """Check if daemon is currently running."""
+    if not DAEMON_PID_FILE.exists():
+        return False
+    
+    try:
+        with open(DAEMON_PID_FILE, 'r') as f:
+            pid = int(f.read().strip())
+        
+        # Check if process with this PID exists
+        try:
+            os.kill(pid, 0)  # Signal 0 checks if process exists
+            return True
+        except OSError:
+            # Process doesn't exist, clean up stale PID file
+            DAEMON_PID_FILE.unlink()
+            return False
+    except (ValueError, IOError):
+        return False
+
+
+def get_daemon_status():
+    """Get daemon status information."""
+    if not is_daemon_running():
+        return {
+            "status": "stopped",
+            "message": "Daemon is not running"
+        }
+    
+    try:
+        with open(DAEMON_PID_FILE, 'r') as f:
+            pid = int(f.read().strip())
+    except (ValueError, IOError):
+        return {
+            "status": "error",
+            "message": "Could not read PID file"
+        }
+    
+    config = read_daemon_config()
+    
+    # Try to get last sync time from log
+    last_sync = None
+    if DAEMON_LOG_FILE.exists():
+        try:
+            with open(DAEMON_LOG_FILE, 'r') as f:
+                lines = f.readlines()
+                for line in reversed(lines):
+                    if "Sync completed" in line or "Started daemon" in line:
+                        # Extract timestamp from log line [YYYY-MM-DD HH:MM:SS]
+                        if line.startswith('['):
+                            last_sync = line[1:20]  # Extract timestamp
+                        break
+        except IOError:
+            pass
+    
+    return {
+        "status": "running",
+        "pid": pid,
+        "interval_minutes": config.get("interval_minutes", 5),
+        "days_to_fetch": config.get("days_to_fetch", 90),
+        "last_sync": last_sync,
+        "log_file": str(DAEMON_LOG_FILE)
+    }
+
+
+def start_daemon(interval_minutes=None, days=None):
+    """Start the daemon process."""
+    if is_daemon_running():
+        return {
+            "status": "error",
+            "message": "Daemon is already running"
+        }
+    
+    # Read/update configuration
+    config = read_daemon_config()
+    if interval_minutes is not None:
+        config["interval_minutes"] = interval_minutes
+    if days is not None:
+        config["days_to_fetch"] = days
+    write_daemon_config(config)
+    
+    # Fork process to run in background
+    try:
+        pid = os.fork()
+        if pid > 0:
+            # Parent process - save PID and exit
+            with open(DAEMON_PID_FILE, 'w') as f:
+                f.write(str(pid))
+            
+            return {
+                "status": "success",
+                "message": f"Daemon started with PID {pid}",
+                "pid": pid,
+                "interval_minutes": config["interval_minutes"],
+                "days_to_fetch": config["days_to_fetch"]
+            }
+    except OSError as e:
+        return {
+            "status": "error",
+            "message": f"Failed to fork daemon process: {e}"
+        }
+    
+    # Child process - run daemon loop
+    _run_daemon_loop(config)
+    sys.exit(0)  # Ensure child exits after daemon loop
+
+
+def _run_daemon_loop(config):
+    """Run the daemon sync loop (called in child process)."""
+    interval_seconds = config["interval_minutes"] * 60
+    days_to_fetch = config["days_to_fetch"]
+    
+    # Detach from parent
+    os.setsid()
+    
+    # Close standard file descriptors
+    sys.stdin.close()
+    sys.stdout = open(os.devnull, 'w')
+    sys.stderr = open(os.devnull, 'w')
+    
+    # Cleanup PID file on exit
+    def cleanup():
+        if DAEMON_PID_FILE.exists():
+            DAEMON_PID_FILE.unlink()
+    
+    atexit.register(cleanup)
+    
+    # Handle termination signals
+    def signal_handler(signum, frame):
+        log_daemon(f"Received signal {signum}, stopping daemon")
+        cleanup()
+        sys.exit(0)
+    
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGINT, signal_handler)
+    
+    log_daemon(f"Started daemon (PID {os.getpid()}, interval: {config['interval_minutes']} minutes, days: {days_to_fetch})")
+    
+    while True:
+        try:
+            # Perform sync
+            result = fetch_and_store(days_to_fetch)
+            if "error" in result:
+                log_daemon(f"Sync failed: {result['error']}")
+            else:
+                log_daemon(f"Sync completed: {result['new_readings']} new readings, {result['total_readings']} total")
+        except Exception as e:
+            log_daemon(f"Sync error: {e}")
+        
+        # Sleep until next sync
+        time.sleep(interval_seconds)
+
+
+def stop_daemon():
+    """Stop the daemon process."""
+    if not is_daemon_running():
+        return {
+            "status": "error",
+            "message": "Daemon is not running"
+        }
+    
+    try:
+        with open(DAEMON_PID_FILE, 'r') as f:
+            pid = int(f.read().strip())
+        
+        # Send SIGTERM to daemon process
+        os.kill(pid, signal.SIGTERM)
+        
+        # Wait a moment for graceful shutdown
+        time.sleep(0.5)
+        
+        # Clean up PID file if it still exists
+        if DAEMON_PID_FILE.exists():
+            DAEMON_PID_FILE.unlink()
+        
+        return {
+            "status": "success",
+            "message": f"Daemon stopped (PID {pid})"
+        }
+    except (ValueError, IOError) as e:
+        return {
+            "status": "error",
+            "message": f"Error reading PID file: {e}"
+        }
+    except OSError as e:
+        return {
+            "status": "error",
+            "message": f"Error stopping daemon: {e}"
+        }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Nightscout CGM data fetcher and analyzer"
@@ -2862,6 +3102,35 @@ def main():
     refresh_parser.add_argument(
         "--days", type=int, default=90,
         help="Days of data to fetch (default: 90)"
+    )
+
+    # Daemon command - background sync
+    daemon_parser = subparsers.add_parser(
+        "daemon", help="Manage background sync daemon"
+    )
+    daemon_subparsers = daemon_parser.add_subparsers(dest="daemon_action", help="Daemon actions")
+    
+    # daemon start
+    daemon_start_parser = daemon_subparsers.add_parser(
+        "start", help="Start the background sync daemon"
+    )
+    daemon_start_parser.add_argument(
+        "--interval", type=int, default=5,
+        help="Sync interval in minutes (default: 5)"
+    )
+    daemon_start_parser.add_argument(
+        "--days", type=int, default=90,
+        help="Days of data to fetch on each sync (default: 90)"
+    )
+    
+    # daemon stop
+    daemon_subparsers.add_parser(
+        "stop", help="Stop the background sync daemon"
+    )
+    
+    # daemon status
+    daemon_subparsers.add_parser(
+        "status", help="Check daemon status"
     )
 
     # Query command - flexible pattern analysis
@@ -3002,6 +3271,19 @@ def main():
         result = analyze_cgm(args.days)
     elif args.command == "refresh":
         result = fetch_and_store(args.days)
+    elif args.command == "daemon":
+        if args.daemon_action == "start":
+            result = start_daemon(
+                interval_minutes=args.interval,
+                days=args.days
+            )
+        elif args.daemon_action == "stop":
+            result = stop_daemon()
+        elif args.daemon_action == "status":
+            result = get_daemon_status()
+        else:
+            parser.print_help()
+            sys.exit(1)
     elif args.command == "query":
         day = args.day
         if day and day.isdigit():
