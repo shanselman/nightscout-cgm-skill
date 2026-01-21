@@ -116,6 +116,15 @@ def create_database():
         direction TEXT,
         device TEXT
     )''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS annotations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp_ms INTEGER NOT NULL,
+        tag TEXT NOT NULL,
+        note TEXT,
+        created_at INTEGER NOT NULL
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_annotations_timestamp ON annotations(timestamp_ms)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_annotations_tag ON annotations(tag)')
     conn.commit()
     return conn
 
@@ -197,6 +206,238 @@ def fetch_and_store(days=90):
         "total_readings": total_readings,
         "database": str(DB_PATH)
     }
+
+
+# ============================================================================
+# Annotation Functions
+# ============================================================================
+
+def parse_annotation_time(time_str):
+    """
+    Parse a flexible time string into a timestamp in milliseconds.
+    Supports: 'now', '2pm', '14:30', '2026-01-21 14:30', relative times like '1h ago', '30m ago'
+    """
+    now = datetime.now(timezone.utc)
+    
+    # Handle 'now'
+    if time_str.lower() == 'now':
+        return int(now.timestamp() * 1000)
+    
+    # Handle relative times like '1h ago', '30m ago', '2d ago'
+    import re
+    relative_match = re.match(r'^(\d+)(m|h|d)\s*ago$', time_str.lower())
+    if relative_match:
+        amount = int(relative_match.group(1))
+        unit = relative_match.group(2)
+        if unit == 'm':
+            target = now - timedelta(minutes=amount)
+        elif unit == 'h':
+            target = now - timedelta(hours=amount)
+        elif unit == 'd':
+            target = now - timedelta(days=amount)
+        return int(target.timestamp() * 1000)
+    
+    # Handle time-only formats like '2pm', '14:30', '2:30pm'
+    time_match = re.match(r'^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$', time_str.lower())
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2)) if time_match.group(2) else 0
+        am_pm = time_match.group(3)
+        
+        if am_pm:
+            if am_pm == 'pm' and hour != 12:
+                hour += 12
+            elif am_pm == 'am' and hour == 12:
+                hour = 0
+        
+        target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        return int(target.timestamp() * 1000)
+    
+    # Handle full datetime strings
+    try:
+        # Try ISO format first
+        target = datetime.fromisoformat(time_str.replace('Z', '+00:00'))
+        if target.tzinfo is None:
+            target = target.replace(tzinfo=timezone.utc)
+        return int(target.timestamp() * 1000)
+    except ValueError:
+        pass
+    
+    # Try common formats
+    for fmt in ['%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S', '%m/%d/%Y %H:%M']:
+        try:
+            target = datetime.strptime(time_str, fmt)
+            target = target.replace(tzinfo=timezone.utc)
+            return int(target.timestamp() * 1000)
+        except ValueError:
+            continue
+    
+    raise ValueError(f"Could not parse time: {time_str}. Supported formats: 'now', '2pm', '14:30', '2026-01-21 14:30', '1h ago', '30m ago'")
+
+
+def add_annotation(time_str, tag, note=None):
+    """
+    Add an annotation at a specific time.
+    
+    Args:
+        time_str: Time string (e.g., 'now', '2pm', '14:30', '1h ago')
+        tag: Tag for the annotation (e.g., 'lunch', 'exercise', 'insulin')
+        note: Optional note with more details
+        
+    Returns:
+        Dict with annotation details or error
+    """
+    try:
+        timestamp_ms = parse_annotation_time(time_str)
+    except ValueError as e:
+        return {"error": str(e)}
+    
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Ensure annotations table exists
+    create_database()
+    
+    created_at = int(datetime.now(timezone.utc).timestamp() * 1000)
+    
+    cursor = conn.execute(
+        'INSERT INTO annotations (timestamp_ms, tag, note, created_at) VALUES (?, ?, ?, ?)',
+        (timestamp_ms, tag, note, created_at)
+    )
+    annotation_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    # Format timestamp for display
+    dt = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
+    
+    return {
+        "status": "success",
+        "id": annotation_id,
+        "timestamp": dt.isoformat(),
+        "tag": tag,
+        "note": note
+    }
+
+
+def list_annotations(tag=None, days=None):
+    """
+    List annotations, optionally filtered by tag and/or time range.
+    
+    Args:
+        tag: Optional tag filter
+        days: Optional number of days to look back
+        
+    Returns:
+        Dict with list of annotations
+    """
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Ensure annotations table exists
+    create_database()
+    
+    query = 'SELECT id, timestamp_ms, tag, note, created_at FROM annotations'
+    params = []
+    conditions = []
+    
+    if tag:
+        conditions.append('tag = ?')
+        params.append(tag)
+    
+    if days is not None:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_ms = int(cutoff.timestamp() * 1000)
+        conditions.append('timestamp_ms >= ?')
+        params.append(cutoff_ms)
+    
+    if conditions:
+        query += ' WHERE ' + ' AND '.join(conditions)
+    
+    query += ' ORDER BY timestamp_ms DESC'
+    
+    cursor = conn.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    
+    annotations = []
+    for row in rows:
+        dt = datetime.fromtimestamp(row[1] / 1000, tz=timezone.utc)
+        annotations.append({
+            "id": row[0],
+            "timestamp": dt.isoformat(),
+            "tag": row[2],
+            "note": row[3]
+        })
+    
+    return {
+        "status": "success",
+        "count": len(annotations),
+        "annotations": annotations
+    }
+
+
+def delete_annotation(annotation_id):
+    """
+    Delete an annotation by ID.
+    
+    Args:
+        annotation_id: ID of the annotation to delete
+        
+    Returns:
+        Dict with status
+    """
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Check if annotation exists
+    cursor = conn.execute('SELECT id FROM annotations WHERE id = ?', (annotation_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return {"error": f"Annotation {annotation_id} not found"}
+    
+    conn.execute('DELETE FROM annotations WHERE id = ?', (annotation_id,))
+    conn.commit()
+    conn.close()
+    
+    return {
+        "status": "success",
+        "deleted_id": annotation_id
+    }
+
+
+def get_annotations_for_timerange(start_ms, end_ms):
+    """
+    Get all annotations within a time range.
+    
+    Args:
+        start_ms: Start timestamp in milliseconds
+        end_ms: End timestamp in milliseconds
+        
+    Returns:
+        List of annotation dicts
+    """
+    conn = sqlite3.connect(DB_PATH)
+    
+    # Ensure annotations table exists
+    create_database()
+    
+    cursor = conn.execute(
+        'SELECT id, timestamp_ms, tag, note FROM annotations WHERE timestamp_ms >= ? AND timestamp_ms <= ? ORDER BY timestamp_ms',
+        (start_ms, end_ms)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    
+    annotations = []
+    for row in rows:
+        dt = datetime.fromtimestamp(row[1] / 1000, tz=timezone.utc)
+        annotations.append({
+            "id": row[0],
+            "timestamp_ms": row[1],
+            "timestamp": dt.isoformat(),
+            "tag": row[2],
+            "note": row[3]
+        })
+    
+    return annotations
 
 
 def get_stats(values):
@@ -809,7 +1050,7 @@ def show_day_chart(day_name, days=90, use_color=True):
         print()
 
 
-def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
+def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None, tag=None):
     """
     Query CGM data with flexible filters for pattern analysis.
     
@@ -818,6 +1059,7 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
         day_of_week: Filter by day (0=Monday, 6=Sunday, or name like "Tuesday")
         hour_start: Start hour (0-23) for time window
         hour_end: End hour (0-23) for time window
+        tag: Filter by annotation tag (e.g., 'lunch', 'exercise')
     """
     if not ensure_data(days):
         return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
@@ -825,6 +1067,20 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
+
+    # If filtering by tag, get annotation timestamps
+    annotation_timestamps = []
+    if tag:
+        create_database()  # Ensure annotations table exists
+        ann_rows = conn.execute(
+            "SELECT timestamp_ms FROM annotations WHERE tag = ? AND timestamp_ms >= ?",
+            (tag, cutoff_ms)
+        ).fetchall()
+        annotation_timestamps = [row[0] for row in ann_rows]
+        
+        if not annotation_timestamps:
+            conn.close()
+            return {"error": f"No annotations found with tag '{tag}' in the specified period."}
 
     rows = conn.execute(
         "SELECT sgv, date_ms, date_string FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms",
@@ -847,6 +1103,18 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
     for sgv, date_ms, ds in rows:
         try:
             dt = datetime.fromisoformat(ds.replace("Z", "+00:00"))
+            
+            # Filter by annotation tag - include readings within 3 hours after annotation
+            if tag:
+                # Find if this reading is within 3 hours of any annotation
+                matched = False
+                for ann_ms in annotation_timestamps:
+                    # Reading must be within 3 hours (10800000 ms) after annotation
+                    if ann_ms <= date_ms <= ann_ms + 10800000:
+                        matched = True
+                        break
+                if not matched:
+                    continue
             
             # Filter by day of week
             if day_of_week is not None and dt.weekday() != day_of_week:
@@ -874,6 +1142,8 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
 
     # Build filter description
     filter_desc = []
+    if tag:
+        filter_desc.append(f"tag={tag}")
     if day_of_week is not None:
         filter_desc.append(f"day={day_names[day_of_week].capitalize()}")
     if hour_start is not None and hour_end is not None:
@@ -2884,6 +3154,49 @@ def main():
         "--hour-end", type=int, choices=range(24), metavar="H",
         help="End hour for time window (0-23)"
     )
+    query_parser.add_argument(
+        "--tag", type=str,
+        help="Filter by annotation tag (e.g., lunch, exercise)"
+    )
+
+    # Annotate command - add annotations
+    annotate_parser = subparsers.add_parser(
+        "annotate", help="Add an annotation/event marker"
+    )
+    annotate_parser.add_argument(
+        "--time", type=str, default="now",
+        help="Time of event (e.g., 'now', '2pm', '14:30', '1h ago', '2026-01-21 14:30')"
+    )
+    annotate_parser.add_argument(
+        "--tag", type=str, required=True,
+        help="Tag for the annotation (e.g., lunch, exercise, insulin)"
+    )
+    annotate_parser.add_argument(
+        "--note", type=str,
+        help="Optional note with details (e.g., 'pizza and soda')"
+    )
+
+    # Annotations command - list annotations
+    annotations_parser = subparsers.add_parser(
+        "annotations", help="List annotations"
+    )
+    annotations_parser.add_argument(
+        "--tag", type=str,
+        help="Filter by tag"
+    )
+    annotations_parser.add_argument(
+        "--days", type=int,
+        help="Only show annotations from the last N days"
+    )
+
+    # Delete annotation command
+    delete_annotation_parser = subparsers.add_parser(
+        "delete-annotation", help="Delete an annotation by ID"
+    )
+    delete_annotation_parser.add_argument(
+        "id", type=int,
+        help="ID of the annotation to delete"
+    )
 
     # Patterns command - automatic insight discovery
     patterns_parser = subparsers.add_parser(
@@ -3010,8 +3323,22 @@ def main():
             days=args.days,
             day_of_week=day,
             hour_start=args.hour_start,
-            hour_end=args.hour_end
+            hour_end=args.hour_end,
+            tag=args.tag
         )
+    elif args.command == "annotate":
+        result = add_annotation(
+            time_str=args.time,
+            tag=args.tag,
+            note=args.note
+        )
+    elif args.command == "annotations":
+        result = list_annotations(
+            tag=args.tag,
+            days=args.days
+        )
+    elif args.command == "delete-annotation":
+        result = delete_annotation(args.id)
     elif args.command == "patterns":
         result = find_patterns(args.days)
     elif args.command == "day":
