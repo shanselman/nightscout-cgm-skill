@@ -2,6 +2,14 @@
 *.db
 cgm_data.db
 
+# Daemon files
+cgm_daemon.pid
+cgm_daemon.conf
+cgm_daemon.log
+
+# Generated reports
+nightscout_report.html
+
 # Python
 __pycache__/
 *.py[cod]
