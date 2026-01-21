@@ -12,15 +12,53 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Meal/Event Annotations** - Tag meals, exercise, insulin doses and see correlations with glucose patterns
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
-- **Time Queries** - "What happens Tuesdays after lunch?" 
+- **Time Queries** - "What happens Tuesdays after lunch?" or "How does pizza affect my glucose?"
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
-- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
+
+## Meal/Event Annotations
+
+Track meals, exercise, insulin doses, and other events to understand their impact on your glucose:
+
+```bash
+# Add an annotation
+python scripts/cgm.py annotate --tag lunch --note "pizza and soda" --time "12:30"
+python scripts/cgm.py annotate --tag exercise --note "30 min run" --time "1h ago"
+python scripts/cgm.py annotate --tag insulin --note "10 units" --time "now"
+
+# List all annotations
+python scripts/cgm.py annotations
+
+# Filter by tag
+python scripts/cgm.py annotations --tag lunch
+
+# Query glucose patterns around specific events
+python scripts/cgm.py query --tag pizza --days 30
+
+# Delete an annotation
+python scripts/cgm.py delete-annotation 5
+```
+
+### Time Formats Supported
+
+- `now` - Current time
+- `2pm`, `14:30`, `8am` - Specific times today
+- `1h ago`, `30m ago`, `2d ago` - Relative times
+- `2026-01-21 14:30` - Full datetime
+
+### Use Cases
+
+- "What happens when I eat pizza?" - Track post-meal patterns
+- "Show me my post-workout patterns" - See exercise effects
+- "How does coffee affect my morning glucose?" - Correlate events with readings
+
+Annotations appear in HTML reports with color-coded tags and are organized by type.
 
 ## Interactive HTML Reports
 
@@ -37,7 +75,8 @@ python scripts/cgm.py report --days 90 --open
 - **Date Range Controls** - Quick buttons for 7d/14d/30d/90d/6mo/1yr/All, plus custom date pickers
 - **All charts update dynamically** - No server needed, everything recalculates in your browser
 - **Key Stats Dashboard** - Time-in-Range %, GMI (estimated A1C), CV (variability), average glucose
-- **7 Interactive Charts:**
+- **Annotations Display** - View all your meal, exercise, and event annotations organized by tag
+- **8 Interactive Charts:**
   - Time-in-Range pie chart
   - Modal Day (typical 24-hour profile with percentile bands)
   - Daily trends (average glucose + TIR per day)
@@ -45,6 +84,7 @@ python scripts/cgm.py report --days 90 --open
   - Glucose distribution histogram
   - Time-in-Range heatmap (day × hour) with hover tooltips
   - Weekly summary
+  - Annotations & Events timeline
 
 ### Color Scheme
 

@@ -7,6 +7,11 @@ Commands:
   current              Get the latest glucose reading
   analyze [--days N]   Analyze CGM data (default: 90 days)
   refresh [--days N]   Fetch latest data from Nightscout and update local database
+  annotate             Add meal/event annotations (--tag, --note, --time)
+  annotations          List annotations (filter by --tag or --days)
+  delete-annotation    Delete an annotation by ID
+  query                Query patterns with filters (--day, --hour-start, --hour-end, --tag)
+  report               Generate interactive HTML report with charts
 """
 import argparse
 import json
