@@ -23,19 +23,62 @@ except ImportError:
     print("Error: requests library required. Install with: pip install requests")
     sys.exit(1)
 
-# Configuration - Set NIGHTSCOUT_URL environment variable to your Nightscout API endpoint
-_raw_url = os.environ.get("NIGHTSCOUT_URL")
-if not _raw_url:
-    print("Error: NIGHTSCOUT_URL environment variable not set.")
-    print("Set it to your Nightscout site URL, e.g.:")
-    print("  export NIGHTSCOUT_URL='https://your-site.herokuapp.com'")
-    print("Or the full API endpoint:")
-    print("  export NIGHTSCOUT_URL='https://your-site.herokuapp.com/api/v1/entries.json'")
-    sys.exit(1)
+SKILL_DIR= Path(__file__).parent.parent
+PROFILES_CONFIG = SKILL_DIR / "profiles.json"
+
+# Profile Management Functions (defined early as they're used during module init)
+def load_profiles():
+    """Load profiles configuration from JSON file."""
+    if not PROFILES_CONFIG.exists():
+        return {"active": "default", "profiles": {}}
+    try:
+        with open(PROFILES_CONFIG, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {"active": "default", "profiles": {}}
+
+def save_profiles(profiles_data):
+    """Save profiles configuration to JSON file."""
+    with open(PROFILES_CONFIG, 'w') as f:
+        json.dump(profiles_data, f, indent=2)
+
+def get_active_profile():
+    """Get the name of the currently active profile."""
+    profiles = load_profiles()
+    return profiles.get("active", "default")
+
+def get_profile_url(profile_name=None):
+    """Get Nightscout URL for a profile. Falls back to env var for default profile."""
+    if profile_name is None:
+        profile_name = get_active_profile()
+    
+    profiles = load_profiles()
+    profile = profiles.get("profiles", {}).get(profile_name)
+    
+    if profile and "url" in profile:
+        return profile["url"]
+    
+    # Fall back to environment variable for default profile
+    if profile_name == "default":
+        return os.environ.get("NIGHTSCOUT_URL")
+    
+    return None
+
+def get_db_path(profile_name=None):
+    """Get database path for a profile."""
+    if profile_name is None:
+        profile_name = get_active_profile()
+    
+    if profile_name == "default":
+        return SKILL_DIR / "cgm_data.db"
+    else:
+        return SKILL_DIR / f"cgm_data_{profile_name}.db"
 
 # Normalize the URL - support both full endpoint and just the domain
 def _normalize_nightscout_url(url):
     """Normalize NIGHTSCOUT_URL to always point to /api/v1/entries.json"""
+    if not url:
+        return None
     url = url.rstrip("/")
     if url.endswith("/api/v1/entries.json"):
         return url
@@ -48,10 +91,30 @@ def _normalize_nightscout_url(url):
     # Just the domain
     return url + "/api/v1/entries.json"
 
-API_BASE = _normalize_nightscout_url(_raw_url)
+def get_api_base():
+    """Get API base URL for the active profile."""
+    # Try profile URL first
+    profile_url = get_profile_url()
+    if profile_url:
+        return _normalize_nightscout_url(profile_url)
+    
+    # Fall back to environment variable
+    env_url = os.environ.get("NIGHTSCOUT_URL")
+    if env_url:
+        return _normalize_nightscout_url(env_url)
+    
+    return None
 
-# Derive the API root from the entries URL
-API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
+def get_api_root():
+    """Get API root URL (without /entries.json)."""
+    base = get_api_base()
+    if base:
+        return base.replace("/entries.json", "").rstrip("/")
+    return None
+
+# Legacy globals for backward compatibility (will be None if no URL configured)
+API_BASE = get_api_base()
+API_ROOT = get_api_root()
 
 # Nightscout settings cache
 _cached_settings = None
@@ -62,8 +125,13 @@ def get_nightscout_settings():
     if _cached_settings is not None:
         return _cached_settings
     
+    api_root = get_api_root()
+    if not api_root:
+        _cached_settings = {}
+        return _cached_settings
+    
     try:
-        resp = requests.get(f"{API_ROOT}/status.json", timeout=10)
+        resp = requests.get(f"{api_root}/status.json", timeout=10)
         resp.raise_for_status()
         data = resp.json()
         if isinstance(data, dict):
@@ -100,8 +168,8 @@ def get_thresholds():
         "urgent_high": thresholds.get("bgHigh", 250),
     }
 
-SKILL_DIR= Path(__file__).parent.parent
-DB_PATH = SKILL_DIR / "cgm_data.db"
+# For backward compatibility, use active profile's DB path
+DB_PATH = get_db_path()
 
 
 def create_database():
@@ -143,8 +211,160 @@ def ensure_data(days=90):
     return True
 
 
+# Profile Management Commands
+def profile_create(name, url):
+    """Create a new profile with a Nightscout URL."""
+    if not name or not name.strip():
+        return {"error": "Profile name cannot be empty"}
+    
+    name = name.strip()
+    
+    # Validate name (alphanumeric and underscores/dashes only)
+    if not all(c.isalnum() or c in ('_', '-') for c in name):
+        return {"error": "Profile name can only contain letters, numbers, underscores, and dashes"}
+    
+    if name == "default":
+        return {"error": "Cannot create a profile named 'default' (reserved for environment variable)"}
+    
+    if not url or not url.strip():
+        return {"error": "URL cannot be empty"}
+    
+    url = url.strip()
+    
+    profiles = load_profiles()
+    if name in profiles.get("profiles", {}):
+        return {"error": f"Profile '{name}' already exists"}
+    
+    # Normalize and validate URL
+    normalized_url = _normalize_nightscout_url(url)
+    
+    # Store profile
+    if "profiles" not in profiles:
+        profiles["profiles"] = {}
+    
+    profiles["profiles"][name] = {
+        "url": normalized_url,
+        "created": datetime.now(timezone.utc).isoformat()
+    }
+    
+    save_profiles(profiles)
+    
+    return {
+        "status": "success",
+        "profile": name,
+        "url": normalized_url,
+        "message": f"Profile '{name}' created successfully"
+    }
+
+
+def profile_switch(name):
+    """Switch to a different profile."""
+    if not name or not name.strip():
+        return {"error": "Profile name cannot be empty"}
+    
+    name = name.strip()
+    
+    profiles = load_profiles()
+    
+    # Allow switching to default
+    if name != "default" and name not in profiles.get("profiles", {}):
+        return {"error": f"Profile '{name}' does not exist"}
+    
+    profiles["active"] = name
+    save_profiles(profiles)
+    
+    # Update global DB_PATH and API_BASE for immediate effect
+    global DB_PATH, API_BASE, API_ROOT
+    DB_PATH = get_db_path(name)
+    API_BASE = get_api_base()
+    API_ROOT = get_api_root()
+    
+    return {
+        "status": "success",
+        "active_profile": name,
+        "database": str(DB_PATH),
+        "message": f"Switched to profile '{name}'"
+    }
+
+
+def profile_list():
+    """List all profiles."""
+    profiles = load_profiles()
+    active = profiles.get("active", "default")
+    profile_list = []
+    
+    # Add default profile
+    env_url = os.environ.get("NIGHTSCOUT_URL")
+    profile_list.append({
+        "name": "default",
+        "url": env_url if env_url else "(not configured)",
+        "active": active == "default",
+        "database": str(SKILL_DIR / "cgm_data.db")
+    })
+    
+    # Add custom profiles
+    for name, data in profiles.get("profiles", {}).items():
+        profile_list.append({
+            "name": name,
+            "url": data.get("url", ""),
+            "active": active == name,
+            "database": str(SKILL_DIR / f"cgm_data_{name}.db"),
+            "created": data.get("created", "")
+        })
+    
+    return {
+        "active_profile": active,
+        "profiles": profile_list
+    }
+
+
+def profile_delete(name):
+    """Delete a profile."""
+    if not name or not name.strip():
+        return {"error": "Profile name cannot be empty"}
+    
+    name = name.strip()
+    
+    if name == "default":
+        return {"error": "Cannot delete the default profile"}
+    
+    profiles = load_profiles()
+    
+    if name not in profiles.get("profiles", {}):
+        return {"error": f"Profile '{name}' does not exist"}
+    
+    # Don't allow deleting the active profile
+    if profiles.get("active") == name:
+        return {"error": f"Cannot delete active profile '{name}'. Switch to another profile first."}
+    
+    # Remove profile
+    del profiles["profiles"][name]
+    save_profiles(profiles)
+    
+    # Optionally delete the database file
+    db_path = SKILL_DIR / f"cgm_data_{name}.db"
+    db_deleted = False
+    if db_path.exists():
+        try:
+            db_path.unlink()
+            db_deleted = True
+        except OSError:
+            pass
+    
+    return {
+        "status": "success",
+        "profile": name,
+        "database_deleted": db_deleted,
+        "message": f"Profile '{name}' deleted successfully"
+    }
+
+
 def fetch_and_store(days=90):
     """Fetch CGM data from Nightscout and store in database."""
+    api_base = get_api_base()
+    if not api_base:
+        return {"error": "No Nightscout URL configured. Set NIGHTSCOUT_URL environment variable or create a profile."}
+    
     conn = create_database()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
@@ -158,7 +378,7 @@ def fetch_and_store(days=90):
             params["find[date][$lte]"] = oldest_date
 
         try:
-            resp = requests.get(API_BASE, params=params, timeout=30)
+            resp = requests.get(api_base, params=params, timeout=30)
             resp.raise_for_status()
             entries = resp.json()
         except requests.RequestException as e:
@@ -294,8 +514,12 @@ def analyze_cgm(days=90):
 
 def get_current_glucose():
     """Get the most recent glucose reading from Nightscout."""
+    api_base = get_api_base()
+    if not api_base:
+        return {"error": "No Nightscout URL configured. Set NIGHTSCOUT_URL environment variable or create a profile."}
+    
     try:
-        resp = requests.get(API_BASE, params={"count": 1}, timeout=10)
+        resp = requests.get(api_base, params={"count": 1}, timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as e:
@@ -2994,6 +3218,36 @@ def main():
         help="Open the report in default browser after generating"
     )
 
+    # Profile command - manage multiple profiles
+    profile_parser = subparsers.add_parser(
+        "profile", help="Manage multiple Nightscout profiles"
+    )
+    profile_subparsers = profile_parser.add_subparsers(dest="profile_action", help="Profile actions")
+    
+    # profile create
+    create_parser = profile_subparsers.add_parser(
+        "create", help="Create a new profile"
+    )
+    create_parser.add_argument("name", type=str, help="Profile name")
+    create_parser.add_argument("--url", type=str, required=True, help="Nightscout URL")
+    
+    # profile switch
+    switch_parser = profile_subparsers.add_parser(
+        "switch", help="Switch to a different profile"
+    )
+    switch_parser.add_argument("name", type=str, help="Profile name")
+    
+    # profile list
+    profile_subparsers.add_parser(
+        "list", help="List all profiles"
+    )
+    
+    # profile delete
+    delete_parser = profile_subparsers.add_parser(
+        "delete", help="Delete a profile"
+    )
+    delete_parser.add_argument("name", type=str, help="Profile name")
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -3060,6 +3314,18 @@ def main():
             if args.open:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
+    elif args.command == "profile":
+        if args.profile_action == "create":
+            result = profile_create(args.name, args.url)
+        elif args.profile_action == "switch":
+            result = profile_switch(args.name)
+        elif args.profile_action == "list":
+            result = profile_list()
+        elif args.profile_action == "delete":
+            result = profile_delete(args.name)
+        else:
+            profile_parser.print_help()
+            sys.exit(1)
     else:
         parser.print_help()
         sys.exit(1)
