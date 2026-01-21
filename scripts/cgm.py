@@ -7,6 +7,8 @@ Commands:
   current              Get the latest glucose reading
   analyze [--days N]   Analyze CGM data (default: 90 days)
   refresh [--days N]   Fetch latest data from Nightscout and update local database
+  report [--days N] [--pdf] [--output PATH]
+                       Generate HTML or PDF report (default: 90 days)
 """
 import argparse
 import json
@@ -1232,10 +1234,17 @@ def generate_html_report(days=90, output_path=None, pdf=False):
     
     Args:
         days: Number of days to include in the report
-        output_path: Path to save the HTML file (default: nightscout_report.html in skill dir)
+        output_path: Path to save the file (default: nightscout_report.html/.pdf in skill dir)
+        pdf: If True, generate PDF output instead of HTML (requires weasyprint)
     
     Returns:
-        Path to the generated HTML file, or error dict
+        Dictionary with:
+          - status: "success" or "error"
+          - report: Path to the generated file
+          - days_analyzed: Number of days included
+          - readings: Total number of readings
+          - date_range: String describing the date range
+        Or error dict if generation fails
     """
     if not ensure_data(days):
         return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
@@ -2887,11 +2896,11 @@ def generate_html_report(days=90, output_path=None, pdf=False):
     # Convert to PDF if requested
     if pdf:
         try:
+            # Import weasyprint only when needed (optional dependency)
             from weasyprint import HTML
             HTML(filename=str(html_temp_path)).write_pdf(str(output_path))
             # Clean up temporary HTML file if we created it for PDF generation
             if html_temp_path != output_path:
-                import os
                 os.remove(html_temp_path)
         except ImportError:
             return {
