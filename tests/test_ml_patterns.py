@@ -296,7 +296,7 @@ class TestAnomalyDetection:
     
     def test_insufficient_data_for_anomalies(self):
         """Should return error with insufficient data."""
-        rows = [(120, 1000 + i*1000, f"2024-01-0{i}T00:00:00Z") for i in range(50)]
+        rows = [(120, 1000 + i*1000, f"2024-01-{i+1:02d}T00:00:00Z") for i in range(50)]
         thresholds = {"target_low": 70, "target_high": 180}
         
         result = ml_patterns.detect_anomalies(rows, thresholds)

@@ -17,6 +17,12 @@ except ImportError:
     print("Error: scikit-learn required. Install with: pip install scikit-learn")
     raise
 
+# Minimum data requirements for ML analyses
+MIN_READINGS_CLUSTERING = 50
+MIN_READINGS_ANOMALY = 100
+MIN_DAYS_ANOMALY = 10
+MIN_READINGS_ML_INSIGHTS = 50
+
 
 def extract_features_from_readings(rows: List[Tuple], thresholds: Dict) -> Tuple[np.ndarray, List[Dict]]:
     """
@@ -94,8 +100,8 @@ def cluster_time_patterns(rows: List[Tuple], thresholds: Dict, n_clusters: int =
     Returns:
         Dictionary with cluster insights and patterns
     """
-    if len(rows) < 50:
-        return {"error": "Need at least 50 readings for pattern clustering"}
+    if len(rows) < MIN_READINGS_CLUSTERING:
+        return {"error": f"Need at least {MIN_READINGS_CLUSTERING} readings for pattern clustering"}
     
     features, metadata = extract_features_from_readings(rows, thresholds)
     
@@ -107,7 +113,7 @@ def cluster_time_patterns(rows: List[Tuple], thresholds: Dict, n_clusters: int =
     features_scaled = scaler.fit_transform(features)
     
     # K-means clustering
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
     cluster_labels = kmeans.fit_predict(features_scaled)
     
     # Analyze each cluster
@@ -323,8 +329,8 @@ def detect_anomalies(rows: List[Tuple], thresholds: Dict, contamination: float =
     Returns:
         Dictionary with anomaly detection results
     """
-    if len(rows) < 100:
-        return {"error": "Need at least 100 readings for anomaly detection"}
+    if len(rows) < MIN_READINGS_ANOMALY:
+        return {"error": f"Need at least {MIN_READINGS_ANOMALY} readings for anomaly detection"}
     
     # Group readings by day
     by_date = defaultdict(list)
@@ -366,8 +372,8 @@ def detect_anomalies(rows: List[Tuple], thresholds: Dict, contamination: float =
             "tir_percent": tir_pct
         })
     
-    if len(day_features) < 10:
-        return {"error": "Need at least 10 days of data for anomaly detection"}
+    if len(day_features) < MIN_DAYS_ANOMALY:
+        return {"error": f"Need at least {MIN_DAYS_ANOMALY} days of data for anomaly detection"}
     
     features_array = np.array(day_features)
     
@@ -447,8 +453,8 @@ def generate_ml_insights(rows: List[Tuple], thresholds: Dict) -> Dict[str, Any]:
     Returns:
         Dictionary with all ML insights
     """
-    if len(rows) < 50:
-        return {"error": "Need at least 50 readings for ML pattern analysis"}
+    if len(rows) < MIN_READINGS_ML_INSIGHTS:
+        return {"error": f"Need at least {MIN_READINGS_ML_INSIGHTS} readings for ML pattern analysis"}
     
     # Run all ML analyses
     cluster_results = cluster_time_patterns(rows, thresholds)
