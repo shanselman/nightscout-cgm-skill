@@ -2839,6 +2839,192 @@ def generate_html_report(days=90, output_path=None):
     }
 
 
+def check_patterns_for_alerts(days=1):
+    """
+    Check recent data for concerning patterns and send notifications.
+    
+    Args:
+        days: Number of days to check (default: 1 for recent patterns)
+    
+    Returns:
+        Dict with alerts found and notifications sent
+    """
+    try:
+        from notifications import NotificationManager, PatternDetector, NotificationConfig
+    except ImportError:
+        return {"error": "Notification system not available. Install with: pip install plyer"}
+    
+    if not ensure_data(days):
+        return {"error": "Could not fetch data from Nightscout"}
+    
+    # Get recent readings
+    conn = sqlite3.connect(DB_PATH)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff_ms = int(cutoff.timestamp() * 1000)
+    
+    rows = conn.execute(
+        "SELECT sgv, date_ms, date_string, direction FROM readings WHERE date_ms >= ? AND sgv > 0 ORDER BY date_ms DESC",
+        (cutoff_ms,)
+    ).fetchall()
+    conn.close()
+    
+    if not rows:
+        return {"error": "No recent data found"}
+    
+    readings = [
+        {"sgv": row[0], "date_ms": row[1], "date_string": row[2], "direction": row[3]}
+        for row in rows
+    ]
+    
+    # Initialize notification system
+    config = NotificationConfig()
+    manager = NotificationManager(config)
+    detector = PatternDetector(config)
+    
+    # Check for patterns
+    alerts = []
+    
+    # Check for prolonged high
+    alert = detector.check_prolonged_high(readings)
+    if alert:
+        alerts.append(alert)
+        manager.send(alert["title"], alert["message"], alert["level"])
+    
+    # Check for overnight low (if checking more than 12 hours)
+    if days >= 0.5:
+        alert = detector.check_overnight_low(readings)
+        if alert:
+            alerts.append(alert)
+            manager.send(alert["title"], alert["message"], alert["level"])
+    
+    return {
+        "status": "success",
+        "alerts_found": len(alerts),
+        "alerts": alerts,
+        "quiet_hours": config.is_quiet_hours()
+    }
+
+
+def generate_weekly_summary_notification():
+    """
+    Generate and send a weekly summary notification.
+    
+    Returns:
+        Dict with summary info
+    """
+    try:
+        from notifications import NotificationManager, PatternDetector, NotificationConfig
+    except ImportError:
+        return {"error": "Notification system not available. Install with: pip install plyer"}
+    
+    # Analyze last 7 days
+    stats = analyze_cgm(days=7)
+    if "error" in stats:
+        return stats
+    
+    # Generate summary
+    config = NotificationConfig()
+    manager = NotificationManager(config)
+    detector = PatternDetector(config)
+    
+    summary = detector.generate_weekly_summary(stats)
+    manager.send(summary["title"], summary["message"], summary["level"])
+    
+    return {
+        "status": "success",
+        "summary": summary
+    }
+
+
+def configure_notifications(action="show", **kwargs):
+    """
+    Configure notification settings.
+    
+    Args:
+        action: 'show', 'enable', 'disable', 'set-quiet-hours', 'reset'
+        **kwargs: Configuration parameters
+    
+    Returns:
+        Dict with configuration status
+    """
+    try:
+        from notifications import NotificationConfig, create_default_config, get_config_path
+    except ImportError:
+        return {"error": "Notification system not available"}
+    
+    config = NotificationConfig()
+    
+    if action == "show":
+        return {
+            "status": "success",
+            "config_file": get_config_path(),
+            "config": config.config
+        }
+    
+    elif action == "enable":
+        config.config["enabled"] = True
+        config.save()
+        return {"status": "success", "message": "Notifications enabled"}
+    
+    elif action == "disable":
+        config.config["enabled"] = False
+        config.save()
+        return {"status": "success", "message": "Notifications disabled"}
+    
+    elif action == "set-quiet-hours":
+        start = kwargs.get("start", "22:00")
+        end = kwargs.get("end", "07:00")
+        enabled = kwargs.get("enabled", True)
+        
+        config.config["quiet_hours"] = {
+            "enabled": enabled,
+            "start": start,
+            "end": end
+        }
+        config.save()
+        return {
+            "status": "success",
+            "message": f"Quiet hours {'enabled' if enabled else 'disabled'}",
+            "quiet_hours": config.config["quiet_hours"]
+        }
+    
+    elif action == "reset":
+        config.config = create_default_config()
+        return {"status": "success", "message": "Configuration reset to defaults"}
+    
+    else:
+        return {"error": f"Unknown action: {action}"}
+
+
+def test_notification(message="Test notification from Nightscout CGM", level="info"):
+    """
+    Send a test notification.
+    
+    Args:
+        message: Message to send
+        level: Alert level (info, warning, urgent)
+    
+    Returns:
+        Dict with result
+    """
+    try:
+        from notifications import NotificationManager, NotificationConfig
+    except ImportError:
+        return {"error": "Notification system not available. Install with: pip install plyer"}
+    
+    config = NotificationConfig()
+    manager = NotificationManager(config)
+    
+    manager.send("Test Notification", message, level)
+    
+    return {
+        "status": "success",
+        "message": "Test notification sent",
+        "level": level,
+        "quiet_hours": config.is_quiet_hours()
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Nightscout CGM data fetcher and analyzer"
@@ -2994,6 +3180,51 @@ def main():
         help="Open the report in default browser after generating"
     )
 
+    # Notification commands
+    notify_parser = subparsers.add_parser(
+        "notify", help="Send a test notification"
+    )
+    notify_parser.add_argument(
+        "--message", "-m", type=str, default="Test notification from Nightscout CGM",
+        help="Notification message"
+    )
+    notify_parser.add_argument(
+        "--level", "-l", type=str, choices=["info", "warning", "urgent"], default="info",
+        help="Alert level (default: info)"
+    )
+
+    # Check patterns command
+    check_parser = subparsers.add_parser(
+        "check-patterns", help="Check for concerning patterns and send notifications"
+    )
+    check_parser.add_argument(
+        "--days", type=int, default=1,
+        help="Number of days to check (default: 1)"
+    )
+
+    # Configure notifications command
+    config_parser = subparsers.add_parser(
+        "configure-notifications", help="Configure notification settings"
+    )
+    config_parser.add_argument(
+        "action", type=str, 
+        choices=["show", "enable", "disable", "set-quiet-hours", "reset"],
+        help="Configuration action"
+    )
+    config_parser.add_argument(
+        "--start", type=str,
+        help="Quiet hours start time (HH:MM format, e.g., 22:00)"
+    )
+    config_parser.add_argument(
+        "--end", type=str,
+        help="Quiet hours end time (HH:MM format, e.g., 07:00)"
+    )
+
+    # Weekly summary command
+    summary_parser = subparsers.add_parser(
+        "weekly-summary", help="Generate and send weekly summary notification"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -3060,6 +3291,19 @@ def main():
             if args.open:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
+    elif args.command == "notify":
+        result = test_notification(args.message, args.level)
+    elif args.command == "check-patterns":
+        result = check_patterns_for_alerts(args.days)
+    elif args.command == "configure-notifications":
+        kwargs = {}
+        if args.start:
+            kwargs["start"] = args.start
+        if args.end:
+            kwargs["end"] = args.end
+        result = configure_notifications(args.action, **kwargs)
+    elif args.command == "weekly-summary":
+        result = generate_weekly_summary_notification()
     else:
         parser.print_help()
         sys.exit(1)
