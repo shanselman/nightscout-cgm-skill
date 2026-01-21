@@ -12,13 +12,13 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Smart Notifications** - Cross-platform alerts for concerning patterns (prolonged highs, overnight lows, weekly summaries)
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
 - **Worst Days Finder** - Find your problem days ranked by peak glucose
 - **Time Queries** - "What happens Tuesdays after lunch?" 
 - **Terminal Visualizations** - Heatmaps, sparklines, and day charts
-- **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Statistics** - Time-in-range, GMI (estimated A1C), glucose variability
 - **Privacy-First** - All data stored and analyzed locally on your machine
 
@@ -147,7 +147,8 @@ The skill simply runs a local Python script and returns text output. Your health
 ## Prerequisites
 
 - Python 3.8+
-- `requests` library (`pip install requests`)
+- `requests` library (for fetching CGM data)
+- `plyer` library (for desktop notifications, optional)
 - A [Nightscout](http://www.nightscout.info/) instance with API access
 
 ## Installation
@@ -173,7 +174,14 @@ git clone https://github.com/shanselman/nightscout-cgm-skill .github/skills/nigh
 ### Install Dependencies
 
 ```bash
+# Required
 pip install requests
+
+# Optional (for desktop notifications)
+pip install plyer
+
+# Or install all at once
+pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -248,6 +256,12 @@ Just ask naturally:
 - "Show me a heatmap of my glucose"
 - "What does Saturday look like?"
 
+**Notifications:**
+- "Check for concerning patterns in my recent data"
+- "Send me a weekly summary"
+- "Configure my notification settings"
+- "Enable quiet hours from 10pm to 7am"
+
 ### Direct CLI Usage
 
 ```bash
@@ -268,6 +282,13 @@ python scripts/cgm.py analyze --days 30
 
 # Find patterns automatically (best/worst times, problem areas)
 python scripts/cgm.py patterns
+
+# Notifications
+python scripts/cgm.py notify --message "Test notification" --level info
+python scripts/cgm.py check-patterns --days 1
+python scripts/cgm.py weekly-summary
+python scripts/cgm.py configure-notifications show
+python scripts/cgm.py configure-notifications set-quiet-hours --start 22:00 --end 07:00
 
 # View all readings for a specific date
 python scripts/cgm.py day yesterday
@@ -361,6 +382,114 @@ The report is:
 - **Privacy-first** - All data stays local, no external servers
 - **Interactive** - Hover for details, responsive design
 - **Shareable** - Open in any browser, send to your doctor
+
+## Smart Notifications
+
+Get alerts for concerning patterns in your CGM data with cross-platform notifications.
+
+### Features
+
+- 🖥️ **Cross-platform desktop notifications** - Windows toast, macOS notification center, Linux notifications
+- 💻 **Terminal notifications** - Colored output and system bell
+- 🔕 **Quiet hours** - Configurable do-not-disturb periods
+- ⚠️ **Alert levels** - Info, warning, and urgent with different behaviors
+- 🎯 **Pattern detection:**
+  - Prolonged high glucose (e.g., "You've been high for 2 hours")
+  - Unusual overnight lows
+  - Weekly summary notifications
+
+### Quick Start
+
+```bash
+# Test notifications
+python scripts/cgm.py notify --message "Hello from Nightscout" --level info
+
+# Check for concerning patterns
+python scripts/cgm.py check-patterns
+
+# Generate weekly summary notification
+python scripts/cgm.py weekly-summary
+
+# Configure notifications
+python scripts/cgm.py configure-notifications show
+python scripts/cgm.py configure-notifications set-quiet-hours --start 22:00 --end 07:00
+python scripts/cgm.py configure-notifications enable
+```
+
+### Configuration
+
+Notifications are configured in `~/.nightscout-cgm/notifications.json`:
+
+```json
+{
+  "enabled": true,
+  "quiet_hours": {
+    "enabled": true,
+    "start": "22:00",
+    "end": "07:00"
+  },
+  "thresholds": {
+    "prolonged_high_hours": 2,
+    "prolonged_high_threshold": 180,
+    "overnight_low_threshold": 70,
+    "overnight_hours_start": 22,
+    "overnight_hours_end": 6
+  },
+  "alert_levels": {
+    "info": {
+      "desktop": true,
+      "terminal": true,
+      "sound": false
+    },
+    "warning": {
+      "desktop": true,
+      "terminal": true,
+      "sound": true
+    },
+    "urgent": {
+      "desktop": true,
+      "terminal": true,
+      "sound": true
+    }
+  }
+}
+```
+
+### Use Cases
+
+**Prolonged high detection:**
+```bash
+# Checks recent data for glucose above threshold for extended period
+python scripts/cgm.py check-patterns --days 1
+```
+
+**Overnight monitoring:**
+```bash
+# Checks for overnight lows in last 12 hours
+python scripts/cgm.py check-patterns --days 1
+```
+
+**Weekly summaries:**
+```bash
+# Generate a comprehensive weekly summary notification
+python scripts/cgm.py weekly-summary
+```
+
+### Automation
+
+You can set up automated pattern checking with cron (Linux/macOS) or Task Scheduler (Windows):
+
+**Linux/macOS cron example:**
+```bash
+# Check for patterns every hour
+0 * * * * cd ~/.copilot/skills/nightscout-cgm && python scripts/cgm.py check-patterns
+
+# Weekly summary every Sunday at 9 AM
+0 9 * * 0 cd ~/.copilot/skills/nightscout-cgm && python scripts/cgm.py weekly-summary
+```
+
+**Windows Task Scheduler:**
+Create scheduled tasks to run the commands at your preferred intervals.
 
 ## Output Examples
 
