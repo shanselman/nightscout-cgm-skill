@@ -326,3 +326,100 @@ class TestOutputFormat:
                 # Should be valid JSON
                 result = json.loads(captured.out)
                 assert "glucose" in result
+
+
+class TestNotificationCommands:
+    """Tests for notification CLI commands."""
+    
+    def test_notify_command(self, cgm_module):
+        """'notify' command should work."""
+        with patch.object(cgm_module, "test_notification") as mock_notify:
+            mock_notify.return_value = {"status": "success"}
+            with patch.object(sys, "argv", ["cgm.py", "notify"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_notify.assert_called_once()
+    
+    def test_notify_with_message(self, cgm_module):
+        """'notify --message' should pass message."""
+        with patch.object(cgm_module, "test_notification") as mock_notify:
+            mock_notify.return_value = {"status": "success"}
+            with patch.object(sys, "argv", [
+                "cgm.py", "notify", "--message", "Custom message", "--level", "warning"
+            ]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_notify.assert_called_once_with("Custom message", "warning")
+    
+    def test_check_patterns_command(self, cgm_module):
+        """'check-patterns' command should work."""
+        with patch.object(cgm_module, "check_patterns_for_alerts") as mock_check:
+            mock_check.return_value = {"status": "success", "alerts_found": 0}
+            with patch.object(sys, "argv", ["cgm.py", "check-patterns"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_check.assert_called_once()
+    
+    def test_check_patterns_with_days(self, cgm_module):
+        """'check-patterns --days N' should pass days parameter."""
+        with patch.object(cgm_module, "check_patterns_for_alerts") as mock_check:
+            mock_check.return_value = {"status": "success", "alerts_found": 0}
+            with patch.object(sys, "argv", ["cgm.py", "check-patterns", "--days", "2"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_check.assert_called_once_with(2)
+    
+    def test_configure_notifications_show(self, cgm_module):
+        """'configure-notifications show' should work."""
+        with patch.object(cgm_module, "configure_notifications") as mock_config:
+            mock_config.return_value = {"status": "success", "config": {}}
+            with patch.object(sys, "argv", ["cgm.py", "configure-notifications", "show"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_config.assert_called_once()
+    
+    def test_configure_notifications_quiet_hours(self, cgm_module):
+        """'configure-notifications set-quiet-hours' should work."""
+        with patch.object(cgm_module, "configure_notifications") as mock_config:
+            mock_config.return_value = {"status": "success"}
+            with patch.object(sys, "argv", [
+                "cgm.py", "configure-notifications", "set-quiet-hours",
+                "--start", "22:00", "--end", "07:00"
+            ]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_config.assert_called_once()
+                    call_kwargs = mock_config.call_args[1]
+                    assert call_kwargs["start"] == "22:00"
+                    assert call_kwargs["end"] == "07:00"
+    
+    def test_weekly_summary_command(self, cgm_module):
+        """'weekly-summary' command should work."""
+        with patch.object(cgm_module, "generate_weekly_summary_notification") as mock_summary:
+            mock_summary.return_value = {"status": "success"}
+            with patch.object(sys, "argv", ["cgm.py", "weekly-summary"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_summary.assert_called_once()
+
