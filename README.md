@@ -13,6 +13,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
 - **Current Glucose** - Real-time blood glucose with trend direction
+- **Trend Alerts** - Proactive pattern detection for recurring lows/highs (e.g., "Morning lows 8-10am")
 - **Period Comparison** - Compare different time periods side-by-side to track progress
 - **Pattern Analysis** - Find your best/worst times, problem days, overnight patterns
 - **Specific Day Analysis** - Drill into what happened on a particular date
@@ -90,6 +91,9 @@ python scripts/cgm.py current
 python scripts/cgm.py compare --period1 "last 7 days" --period2 "previous 7 days"
 python scripts/cgm.py compare --period1 "this week" --period2 "last week"
 python scripts/cgm.py compare --period1 "January" --period2 "December"
+
+# Get trend alerts (recurring patterns like morning lows)
+python scripts/cgm.py alerts --days 30
 
 # Find patterns (best/worst times, problem areas)
 python scripts/cgm.py patterns
@@ -283,6 +287,9 @@ python scripts/cgm.py compare --period1 "last 7 days" --period2 "previous 7 days
 python scripts/cgm.py compare --period1 "this week" --period2 "last week"
 python scripts/cgm.py compare --period1 "this month" --period2 "last month"
 python scripts/cgm.py compare --period1 "January" --period2 "December"
+
+# Get trend alerts (recurring patterns)
+python scripts/cgm.py alerts --days 30
 
 # Find patterns automatically (best/worst times, problem areas)
 python scripts/cgm.py patterns
