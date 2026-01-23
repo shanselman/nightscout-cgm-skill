@@ -2530,6 +2530,208 @@ def generate_html_report(days=90, output_path=None):
             font-size: 0.9rem;
         }
         
+        /* Compare Section */
+        .compare-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .compare-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .compare-header:hover {
+            opacity: 0.8;
+        }
+        
+        .compare-section.collapsed .compare-header {
+            margin-bottom: 0;
+        }
+        
+        .compare-section:not(.collapsed) .compare-header {
+            margin-bottom: 20px;
+        }
+        
+        .compare-toggle {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        
+        .compare-section:not(.collapsed) .compare-toggle {
+            transform: rotate(90deg);
+        }
+        
+        .compare-body {
+            display: none;
+        }
+        
+        .compare-section:not(.collapsed) .compare-body {
+            display: block;
+        }
+        
+        .compare-section h2 {
+            margin: 0;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .compare-section h2::before {
+            content: '📊';
+            font-size: 1.5rem;
+        }
+        
+        .compare-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .compare-controls select {
+            padding: 8px 12px;
+            border: 1px solid var(--bg-card);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border-radius: 6px;
+            font-size: 0.9rem;
+            cursor: pointer;
+        }
+        
+        .compare-controls label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+        
+        .compare-period {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .compare-period h3 {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .compare-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--bg-secondary);
+        }
+        
+        .compare-stat:last-child {
+            border-bottom: none;
+        }
+        
+        .compare-stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .compare-stat-value {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+        
+        .compare-deltas {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px 10px;
+        }
+        
+        .delta-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+        
+        .delta-badge.improved {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+        }
+        
+        .delta-badge.worsened {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--danger);
+        }
+        
+        .delta-badge.unchanged {
+            background: rgba(107, 114, 128, 0.15);
+            color: var(--text-secondary);
+        }
+        
+        .compare-summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: var(--bg-card);
+            border-radius: 8px;
+        }
+        
+        .compare-summary h4 {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 10px;
+        }
+        
+        .compare-summary ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        
+        .compare-summary li {
+            padding: 5px 0;
+            font-size: 0.9rem;
+        }
+        
+        .compare-summary li.improvement::before {
+            content: '✅ ';
+        }
+        
+        .compare-summary li.regression::before {
+            content: '⚠️ ';
+        }
+        
+        @media (max-width: 768px) {
+            .compare-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .compare-deltas {
+                flex-direction: row;
+                flex-wrap: wrap;
+                justify-content: center;
+            }
+        }
+        
         @media (max-width: 768px) {
             .grid-2 {
                 grid-template-columns: 1fr;
@@ -2592,6 +2794,37 @@ def generate_html_report(days=90, output_path=None):
             <div class="stat-card">
                 <div class="value">%(mean)s</div>
                 <div class="label">Average Glucose (%(unit)s)</div>
+            </div>
+        </div>
+        
+        <!-- Compare Periods (collapsed by default) -->
+        <div class="compare-section collapsed" id="compareSection">
+            <div class="compare-header" onclick="toggleCompareSection()">
+                <h2>Compare Periods</h2>
+                <span class="compare-toggle">▶</span>
+            </div>
+            <div class="compare-body" id="compareBody">
+                <div class="compare-controls">
+                    <label>Compare:</label>
+                    <select id="comparePeriod1" onchange="runComparison()">
+                        <option value="7">Last 7 days</option>
+                        <option value="14">Last 14 days</option>
+                        <option value="30">Last 30 days</option>
+                    </select>
+                    <label>vs</label>
+                    <select id="comparePeriod2" onchange="runComparison()">
+                        <option value="prev7">Previous 7 days</option>
+                        <option value="prev14">Previous 14 days</option>
+                        <option value="prev30">Previous 30 days</option>
+                    </select>
+                </div>
+                <div class="compare-grid" id="compareGrid">
+                    <!-- Comparison will be rendered here -->
+                    <div class="compare-period" id="period1Stats"></div>
+                    <div class="compare-deltas" id="compareDeltas"></div>
+                    <div class="compare-period" id="period2Stats"></div>
+                </div>
+                <div class="compare-summary" id="compareSummary"></div>
             </div>
         </div>
         
@@ -3784,6 +4017,186 @@ def generate_html_report(days=90, output_path=None):
         function toggleAlertsSection() {
             const section = document.getElementById('alertsSection');
             section.classList.toggle('collapsed');
+        }
+        
+        function toggleCompareSection() {
+            const section = document.getElementById('compareSection');
+            section.classList.toggle('collapsed');
+            
+            // Run comparison on first open
+            if (!section.classList.contains('collapsed') && !window.comparisonRun) {
+                runComparison();
+                window.comparisonRun = true;
+            }
+        }
+        
+        function runComparison() {
+            const period1Select = document.getElementById('comparePeriod1');
+            const period2Select = document.getElementById('comparePeriod2');
+            const period1Days = parseInt(period1Select.value);
+            const period2Value = period2Select.value;
+            
+            // Calculate date ranges - use 'date' field from readings
+            const now = new Date(allReadings[allReadings.length - 1]?.date || Date.now());
+            const period1End = now;
+            const period1Start = new Date(now);
+            period1Start.setDate(period1Start.getDate() - period1Days);
+            
+            let period2Start, period2End;
+            if (period2Value.startsWith('prev')) {
+                const period2Days = parseInt(period2Value.replace('prev', ''));
+                period2End = new Date(period1Start);
+                period2Start = new Date(period2End);
+                period2Start.setDate(period2Start.getDate() - period2Days);
+            }
+            
+            // Filter readings for each period - use 'date' field
+            const p1Readings = allReadings.filter(r => {
+                const t = new Date(r.date);
+                return t >= period1Start && t <= period1End;
+            });
+            
+            const p2Readings = allReadings.filter(r => {
+                const t = new Date(r.date);
+                return t >= period2Start && t <= period2End;
+            });
+            
+            // Calculate stats for each period
+            const p1Stats = calcPeriodStats(p1Readings, `Last ${period1Days} days`);
+            const p2Stats = calcPeriodStats(p2Readings, `Previous ${period2Value.replace('prev', '')} days`);
+            
+            // Render comparison
+            renderComparison(p1Stats, p2Stats);
+        }
+        
+        function calcPeriodStats(readings, label) {
+            if (readings.length === 0) {
+                return { label, readings: 0, tir: 0, gmi: 0, cv: 0, avg: 0 };
+            }
+            
+            const values = readings.map(r => r.sgv);
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const std = Math.sqrt(values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) / values.length);
+            const cv = (std / avg) * 100;
+            const gmi = 3.31 + (0.02392 * avg);
+            
+            // Time in range - use thresholds object
+            const inRange = values.filter(v => v >= thresholds.targetLow && v <= thresholds.targetHigh).length;
+            const tir = (inRange / values.length) * 100;
+            
+            // Lows
+            const veryLow = values.filter(v => v < thresholds.urgentLow).length;
+            const low = values.filter(v => v >= thresholds.urgentLow && v < thresholds.targetLow).length;
+            const veryLowPct = (veryLow / values.length) * 100;
+            const lowPct = (low / values.length) * 100;
+            
+            return {
+                label,
+                readings: readings.length,
+                tir: tir.toFixed(1),
+                gmi: gmi.toFixed(1),
+                cv: cv.toFixed(1),
+                avg: Math.round(avg),
+                veryLowPct: veryLowPct.toFixed(1),
+                lowPct: lowPct.toFixed(1)
+            };
+        }
+        
+        function renderComparison(p1, p2) {
+            // Period 1 stats
+            document.getElementById('period1Stats').innerHTML = `
+                <h3>${p1.label}</h3>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Readings</span>
+                    <span class="compare-stat-value">${p1.readings.toLocaleString()}</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Time in Range</span>
+                    <span class="compare-stat-value">${p1.tir}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">GMI (Est. A1C)</span>
+                    <span class="compare-stat-value">${p1.gmi}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">CV (Variability)</span>
+                    <span class="compare-stat-value">${p1.cv}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Average</span>
+                    <span class="compare-stat-value">${p1.avg} ${unit}</span>
+                </div>
+            `;
+            
+            // Period 2 stats
+            document.getElementById('period2Stats').innerHTML = `
+                <h3>${p2.label}</h3>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Readings</span>
+                    <span class="compare-stat-value">${p2.readings.toLocaleString()}</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Time in Range</span>
+                    <span class="compare-stat-value">${p2.tir}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">GMI (Est. A1C)</span>
+                    <span class="compare-stat-value">${p2.gmi}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">CV (Variability)</span>
+                    <span class="compare-stat-value">${p2.cv}%%</span>
+                </div>
+                <div class="compare-stat">
+                    <span class="compare-stat-label">Average</span>
+                    <span class="compare-stat-value">${p2.avg} ${unit}</span>
+                </div>
+            `;
+            
+            // Deltas
+            const tirDelta = (parseFloat(p1.tir) - parseFloat(p2.tir)).toFixed(1);
+            const gmiDelta = (parseFloat(p1.gmi) - parseFloat(p2.gmi)).toFixed(1);
+            const cvDelta = (parseFloat(p1.cv) - parseFloat(p2.cv)).toFixed(1);
+            
+            const tirClass = tirDelta > 0 ? 'improved' : tirDelta < 0 ? 'worsened' : 'unchanged';
+            const gmiClass = gmiDelta < 0 ? 'improved' : gmiDelta > 0 ? 'worsened' : 'unchanged';
+            const cvClass = cvDelta < 0 ? 'improved' : cvDelta > 0 ? 'worsened' : 'unchanged';
+            
+            document.getElementById('compareDeltas').innerHTML = `
+                <div class="delta-badge ${tirClass}">
+                    ${tirDelta > 0 ? '↑' : tirDelta < 0 ? '↓' : '→'} ${Math.abs(tirDelta)}%% TIR
+                </div>
+                <div class="delta-badge ${gmiClass}">
+                    ${gmiDelta > 0 ? '↑' : gmiDelta < 0 ? '↓' : '→'} ${Math.abs(gmiDelta)}%% GMI
+                </div>
+                <div class="delta-badge ${cvClass}">
+                    ${cvDelta > 0 ? '↑' : cvDelta < 0 ? '↓' : '→'} ${Math.abs(cvDelta)}%% CV
+                </div>
+            `;
+            
+            // Summary
+            const improvements = [];
+            const regressions = [];
+            
+            if (parseFloat(tirDelta) > 1) improvements.push(`Time in range improved by ${tirDelta} percentage points`);
+            if (parseFloat(tirDelta) < -1) regressions.push(`Time in range decreased by ${Math.abs(tirDelta)} percentage points`);
+            if (parseFloat(gmiDelta) < -0.1) improvements.push(`GMI (estimated A1C) decreased by ${Math.abs(gmiDelta)}%%`);
+            if (parseFloat(gmiDelta) > 0.1) regressions.push(`GMI (estimated A1C) increased by ${gmiDelta}%%`);
+            if (parseFloat(cvDelta) < -2) improvements.push(`Glucose variability improved by ${Math.abs(cvDelta)}%%`);
+            if (parseFloat(cvDelta) > 2) regressions.push(`Glucose variability worsened by ${cvDelta}%%`);
+            
+            let summaryHTML = '';
+            if (improvements.length > 0) {
+                summaryHTML += `<h4>Improvements</h4><ul>${improvements.map(i => `<li class="improvement">${i}</li>`).join('')}</ul>`;
+            }
+            if (regressions.length > 0) {
+                summaryHTML += `<h4>Areas to Watch</h4><ul>${regressions.map(r => `<li class="regression">${r}</li>`).join('')}</ul>`;
+            }
+            if (improvements.length === 0 && regressions.length === 0) {
+                summaryHTML = '<p style="color: var(--text-secondary);">No significant changes between periods.</p>';
+            }
+            
+            document.getElementById('compareSummary').innerHTML = summaryHTML;
         }
         
         function formatAlertDetails(alert) {
