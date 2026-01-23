@@ -33,6 +33,9 @@ Where `<skill-path>` is the location where this skill is installed (e.g., `~/.co
 |---------|-------------|
 | `current` | Get the latest glucose reading |
 | `analyze [--days N]` | Analyze CGM data (default: 90 days) |
+| `report [--days N] [--open]` | Generate interactive HTML report with charts |
+| `compare --period1 P1 --period2 P2` | Compare two time periods side-by-side |
+| `alerts [--days N]` | Get trend alerts for recurring patterns |
 | `refresh [--days N]` | Fetch latest data from Nightscout |
 | `patterns [--days N]` | Find interesting patterns (best/worst times, problem areas) |
 | `query [options]` | Query with filters (day of week, time range) |
@@ -136,6 +139,16 @@ python scripts/cgm.py chart --heatmap
 # Show hourly breakdown for a specific day
 python scripts/cgm.py chart --day Saturday
 
+# Generate interactive HTML report (opens in browser)
+python scripts/cgm.py report --days 90 --open
+
+# Compare two time periods
+python scripts/cgm.py compare --period1 "last 7 days" --period2 "previous 7 days"
+python scripts/cgm.py compare --period1 "this week" --period2 "last week"
+
+# Get trend alerts (recurring patterns)
+python scripts/cgm.py alerts --days 30
+
 # Refresh data from Nightscout
 python scripts/cgm.py refresh
 ```
@@ -146,6 +159,9 @@ With the pattern analysis capabilities, you can ask natural questions like:
 
 - "What's my current glucose?"
 - "Generate a report of my last 90 days"
+- "Compare this week to last week"
+- "How am I doing vs last month?"
+- "What trend alerts do you see?"
 - "Analyze my blood sugar for the last 30 days"
 - "What patterns do you see in my data?"
 - "What's happening on Tuesdays after lunch?"
