@@ -2760,27 +2760,30 @@ def generate_html_report(days=90, output_path=None):
                 padding: 10px;
             }
             
-            /* Hide interactive elements */
+            /* Force heatmap colors to print */
+            .heatmap-cell {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
+            /* Hide interactive elements and compare section */
             .date-controls,
             .print-button,
             .alerts-toggle,
-            .compare-toggle,
             .alerts-expand,
-            .compare-controls {
+            .compare-section {
                 display: none !important;
             }
             
-            /* Force expand collapsed sections */
-            .alerts-section.collapsed .alerts-body,
-            .compare-section.collapsed .compare-body {
+            /* Force expand alerts section */
+            .alerts-section.collapsed .alerts-body {
                 display: block !important;
             }
             
             /* Page breaks */
             .chart-section,
             .stats-grid,
-            .alerts-section,
-            .compare-section {
+            .alerts-section {
                 page-break-inside: avoid;
                 margin-bottom: 20px;
             }
@@ -2789,14 +2792,23 @@ def generate_html_report(days=90, output_path=None):
                 page-break-after: avoid;
             }
             
-            /* Light backgrounds for printing - remove dark theme */
+            /* Fix chart clipping - give more height for axis labels */
+            .chart-container {
+                height: 400px !important;
+                overflow: visible !important;
+            }
+            
+            .chart-container.tall {
+                height: 500px !important;
+            }
+            
+            /* White backgrounds for sections */
             .alerts-section,
-            .compare-section,
             .chart-section,
             .heatmap-container,
             .weekly-summary {
                 background: white !important;
-                border: 1px solid #ddd !important;
+                border: 1px solid #ccc !important;
             }
             
             .disclaimer {
@@ -2806,12 +2818,11 @@ def generate_html_report(days=90, output_path=None):
             
             .stat-card {
                 background: #f9f9f9 !important;
-                border: 1px solid #ddd !important;
-                color: #000 !important;
+                border: 1px solid #ccc !important;
             }
             
-            .stat-card .value,
-            .stat-card .label {
+            /* Dark text for headings and labels */
+            h1, h2, h3, h4, .stat-card .label {
                 color: #000 !important;
             }
             
@@ -2819,21 +2830,16 @@ def generate_html_report(days=90, output_path=None):
                 background: #f9f9f9 !important;
             }
             
-            .compare-period {
-                background: #f9f9f9 !important;
-            }
-            
-            .alerts-header,
-            .compare-header {
+            /* Fix alert text visibility */
+            .alert-item,
+            .alert-item *,
+            .alerts-body,
+            .alerts-body * {
                 color: #000 !important;
             }
             
-            h2, h3, h4 {
+            .alerts-header h2 {
                 color: #000 !important;
-            }
-            
-            .tir-breakdown {
-                background: transparent !important;
             }
             
             /* Footer */
