@@ -1911,7 +1911,38 @@ def generate_html_report(days=90, output_path=None):
             display: flex;
             align-items: center;
             justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .alerts-header:hover {
+            opacity: 0.8;
+        }
+        
+        .alerts-section.collapsed .alerts-header {
+            margin-bottom: 0;
+        }
+        
+        .alerts-section:not(.collapsed) .alerts-header {
             margin-bottom: 15px;
+        }
+        
+        .alerts-toggle {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        
+        .alerts-section:not(.collapsed) .alerts-toggle {
+            transform: rotate(90deg);
+        }
+        
+        .alerts-body {
+            display: none;
+        }
+        
+        .alerts-section:not(.collapsed) .alerts-body {
+            display: block;
         }
         
         .alerts-section h2 {
@@ -1931,6 +1962,7 @@ def generate_html_report(days=90, output_path=None):
             display: flex;
             gap: 12px;
             align-items: center;
+            margin-right: 10px;
         }
         
         .alert-badge {
@@ -2274,20 +2306,23 @@ def generate_html_report(days=90, output_path=None):
             </div>
         </div>
         
-        <!-- Trend Alerts -->
-        <div class="alerts-section" id="alertsSection">
-            <div class="alerts-header">
+        <!-- Trend Alerts (collapsed by default) -->
+        <div class="alerts-section collapsed" id="alertsSection">
+            <div class="alerts-header" onclick="toggleAlertsSection()">
                 <h2>Trend Alerts</h2>
                 <div class="alerts-summary" id="alertsSummary"></div>
+                <span class="alerts-toggle">▶</span>
             </div>
-            <div class="alerts-container" id="alertsContainer">
-                <!-- Top alerts will be rendered here by JavaScript -->
-            </div>
-            <div class="hidden-alerts" id="hiddenAlerts">
-                <!-- Additional alerts shown when expanded -->
-            </div>
-            <div class="alerts-expand" id="alertsExpand" style="display: none;">
-                <button onclick="toggleAlerts()">Show all alerts</button>
+            <div class="alerts-body" id="alertsBody">
+                <div class="alerts-container" id="alertsContainer">
+                    <!-- Top alerts will be rendered here by JavaScript -->
+                </div>
+                <div class="hidden-alerts" id="hiddenAlerts">
+                    <!-- Additional alerts shown when expanded -->
+                </div>
+                <div class="alerts-expand" id="alertsExpand" style="display: none;">
+                    <button onclick="toggleMoreAlerts(event)">Show all alerts</button>
+                </div>
             </div>
         </div>
         
@@ -3229,24 +3264,34 @@ def generate_html_report(days=90, output_path=None):
                 return;
             }
             
-            // Group and summarize alerts
+            // Group and summarize alerts (returns max 10 most impactful)
             const summarized = summarizeAlerts(allAlerts);
             
-            // Count by severity
-            const highCount = summarized.filter(a => a.severity === 'high').length;
-            const mediumCount = summarized.filter(a => a.severity === 'medium').length;
+            if (summarized.length === 0) {
+                container.innerHTML = `
+                    <div class="no-alerts">
+                        <div class="no-alerts-icon">✅</div>
+                        <div>No significant patterns detected. Keep up the good work!</div>
+                    </div>
+                `;
+                summaryDiv.innerHTML = '';
+                expandBtn.style.display = 'none';
+                return;
+            }
             
-            // Render summary badges
+            // Count high priority only (don't show overwhelming counts)
+            const highCount = summarized.filter(a => a.severity === 'high').length;
+            
+            // Render simple summary - just high priority if any
             let summaryHTML = '';
             if (highCount > 0) {
-                summaryHTML += `<span class="alert-badge high">🔴 ${highCount} high priority</span>`;
-            }
-            if (mediumCount > 0) {
-                summaryHTML += `<span class="alert-badge medium">🟡 ${mediumCount} patterns</span>`;
+                summaryHTML = `<span class="alert-badge high">🔴 ${highCount} need${highCount === 1 ? 's' : ''} attention</span>`;
+            } else {
+                summaryHTML = `<span class="alert-badge medium">🟡 ${summarized.length} pattern${summarized.length === 1 ? '' : 's'} to review</span>`;
             }
             summaryDiv.innerHTML = summaryHTML;
             
-            // Show top 5 alerts, hide rest
+            // Show top 5 alerts, hide rest (up to 5 more)
             const maxVisible = 5;
             const visibleAlerts = summarized.slice(0, maxVisible);
             const hiddenAlerts = summarized.slice(maxVisible);
@@ -3256,17 +3301,23 @@ def generate_html_report(days=90, output_path=None):
             if (hiddenAlerts.length > 0) {
                 hiddenContainer.innerHTML = hiddenAlerts.map(alert => renderAlertItem(alert)).join('');
                 expandBtn.style.display = 'block';
-                expandBtn.querySelector('button').textContent = `Show ${hiddenAlerts.length} more alerts`;
+                expandBtn.querySelector('button').textContent = `Show ${hiddenAlerts.length} more`;
             } else {
                 expandBtn.style.display = 'none';
             }
         }
         
         function summarizeAlerts(alerts) {
+            // Filter: require 3+ days minimum to be a real pattern
+            const significantAlerts = alerts.filter(alert => {
+                const days = alert.details?.unique_days || alert.details?.unique_weeks || 0;
+                return days >= 3;
+            });
+            
             // Group alerts by time blocks and category
             const groups = {};
             
-            alerts.forEach(alert => {
+            significantAlerts.forEach(alert => {
                 const key = getAlertGroupKey(alert);
                 if (!groups[key]) {
                     groups[key] = {
@@ -3283,28 +3334,33 @@ def generate_html_report(days=90, output_path=None):
                 }
             });
             
-            // Create summarized alerts
+            // Create summarized alerts with impact scores
             const summarized = Object.entries(groups).map(([key, group]) => {
+                let alert;
                 if (group.alerts.length === 1) {
-                    return group.alerts[0];
+                    alert = { ...group.alerts[0] };
+                } else {
+                    alert = mergeAlerts(group);
                 }
                 
-                // Merge multiple alerts into one summary
-                return mergeAlerts(group);
+                // Calculate impact score: frequency × severity × consistency
+                const occurrences = alert.details?.total_occurrences || alert.details?.occurrences || 0;
+                const days = alert.details?.unique_days || alert.details?.unique_weeks || 1;
+                const severityMultiplier = alert.severity === 'high' ? 3 : alert.severity === 'medium' ? 2 : 1;
+                
+                // Lows are more dangerous than highs
+                const categoryMultiplier = alert.category === 'recurring_lows' ? 1.5 : 1;
+                
+                alert.impactScore = occurrences * severityMultiplier * categoryMultiplier * Math.sqrt(days);
+                
+                return alert;
             });
             
-            // Sort by severity (high first) then by occurrences
-            summarized.sort((a, b) => {
-                const sevOrder = { high: 0, medium: 1, low: 2 };
-                if (sevOrder[a.severity] !== sevOrder[b.severity]) {
-                    return sevOrder[a.severity] - sevOrder[b.severity];
-                }
-                const aOcc = a.details?.occurrences || a.details?.total_occurrences || 0;
-                const bOcc = b.details?.occurrences || b.details?.total_occurrences || 0;
-                return bOcc - aOcc;
-            });
+            // Sort by impact score (highest first)
+            summarized.sort((a, b) => b.impactScore - a.impactScore);
             
-            return summarized;
+            // Return only top 10 most impactful
+            return summarized.slice(0, 10);
         }
         
         function getAlertGroupKey(alert) {
@@ -3419,20 +3475,26 @@ def generate_html_report(days=90, output_path=None):
             `;
         }
         
-        let alertsExpanded = false;
-        function toggleAlerts() {
+        let moreAlertsExpanded = false;
+        function toggleMoreAlerts(event) {
+            event.stopPropagation(); // Don't trigger section collapse
             const hiddenContainer = document.getElementById('hiddenAlerts');
             const btn = document.getElementById('alertsExpand').querySelector('button');
-            alertsExpanded = !alertsExpanded;
+            moreAlertsExpanded = !moreAlertsExpanded;
             
-            if (alertsExpanded) {
+            if (moreAlertsExpanded) {
                 hiddenContainer.classList.add('expanded');
-                btn.textContent = 'Show fewer alerts';
+                btn.textContent = 'Show fewer';
             } else {
                 hiddenContainer.classList.remove('expanded');
                 const count = hiddenContainer.querySelectorAll('.alert-item').length;
-                btn.textContent = `Show ${count} more alerts`;
+                btn.textContent = `Show ${count} more`;
             }
+        }
+        
+        function toggleAlertsSection() {
+            const section = document.getElementById('alertsSection');
+            section.classList.toggle('collapsed');
         }
         
         function formatAlertDetails(alert) {

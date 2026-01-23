@@ -2,6 +2,9 @@
 *.db
 cgm_data.db
 
+# Generated reports (contain personal health data)
+nightscout_report.html
+
 # Python
 __pycache__/
 *.py[cod]
