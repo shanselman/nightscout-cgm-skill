@@ -1829,13 +1829,16 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
     high_severity_alerts = [a for a in alerts if a.get("severity") == "high"]
     medium_severity_alerts = [a for a in alerts if a.get("severity") == "medium"]
     
+    # Alert section reference for user navigation
+    ALERTS_SECTION_REF = "see Trend Alerts"
+    
     if high_severity_alerts:
         status = "critical"
         emoji = "🔴"
         # Include message from the first high severity alert
         alert = high_severity_alerts[0]
-        messages.append(f"{alert['message']} - see Trend Alerts")
-    elif medium_severity_alerts and status != "needs_attention":
+        messages.append(f"{alert['message']} - {ALERTS_SECTION_REF}")
+    elif medium_severity_alerts and status == "stable":
         status = "needs_attention"
         emoji = "⚠️"
     
@@ -1850,20 +1853,19 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
     
     # Generate primary message based on status
     if messages:
-        # Use specific message from alerts
+        # Use specific message from alerts or improvements
         message = messages[0]
     elif status == "critical":
-        message = "Critical patterns detected - review Trend Alerts immediately"
+        message = f"Critical patterns detected - review {ALERTS_SECTION_REF} immediately"
     elif status == "needs_attention":
-        if cv > 36:
+        if cv > CV_STABLE:
             message = "Glucose variability needs attention"
         else:
-            message = "Some concerning patterns detected - see Trend Alerts"
+            message = f"Some concerning patterns detected - {ALERTS_SECTION_REF}"
     elif tir_status == "excellent":
         message = "Your glucose control is excellent this period"
-    elif tir_status == "good":
-        message = "Your glucose control is stable this period"
     else:
+        # tir_status is "good" or default case
         message = "Your glucose control is stable this period"
     
     return {
