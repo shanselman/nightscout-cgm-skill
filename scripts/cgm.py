@@ -2900,6 +2900,255 @@ def generate_html_report(days=90, output_path=None):
                 display: none !important;
             }
         }
+        
+        /* ===================================================================
+           UX ENHANCEMENTS: Navigation, TOC, Collapsible Sections, View Toggle
+           =================================================================== */
+        
+        /* Table of Contents - Sticky at top */
+        .toc-container {
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            border: 1px solid var(--bg-card);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            z-index: 999;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        
+        .toc-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .toc-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        
+        .view-toggle {
+            display: flex;
+            gap: 5px;
+            background: var(--bg-card);
+            padding: 3px;
+            border-radius: 6px;
+        }
+        
+        .view-toggle button {
+            padding: 6px 12px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        .view-toggle button.active {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .view-toggle button:hover:not(.active) {
+            background: rgba(255,255,255,0.1);
+        }
+        
+        .toc-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .toc-link {
+            padding: 6px 12px;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .toc-link:hover {
+            background: var(--accent);
+            color: white;
+            transform: translateY(-1px);
+        }
+        
+        .toc-link.active {
+            background: var(--accent);
+            color: white;
+        }
+        
+        /* Jump Navigation - Sticky on side */
+        .jump-nav {
+            position: fixed;
+            right: 20px;
+            top: 50%%;
+            transform: translateY(-50%%);
+            background: var(--bg-secondary);
+            border: 1px solid var(--bg-card);
+            border-radius: 8px;
+            padding: 10px;
+            z-index: 998;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        
+        .jump-nav-item {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            margin: 5px 0;
+            background: var(--bg-card);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 1.2rem;
+            transition: all 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .jump-nav-item:hover {
+            background: var(--accent);
+            color: white;
+            transform: scale(1.1);
+        }
+        
+        .jump-nav-item.active {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .jump-nav-item .tooltip {
+            position: absolute;
+            right: 50px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+        }
+        
+        .jump-nav-item:hover .tooltip {
+            opacity: 1;
+        }
+        
+        /* Collapsible sections (extending existing pattern) */
+        .chart-section.collapsible {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .chart-section.collapsible.collapsed .section-body {
+            display: none;
+        }
+        
+        .chart-section.collapsible .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            user-select: none;
+            margin-bottom: 0;
+        }
+        
+        .chart-section.collapsible:not(.collapsed) .section-header {
+            margin-bottom: 15px;
+        }
+        
+        .chart-section.collapsible .section-header:hover {
+            opacity: 0.8;
+        }
+        
+        .chart-section.collapsible h2 {
+            margin: 0;
+        }
+        
+        .section-toggle {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        
+        .chart-section.collapsible:not(.collapsed) .section-toggle {
+            transform: rotate(90deg);
+        }
+        
+        /* Summary view - hide non-essential sections */
+        body.summary-view .full-only {
+            display: none !important;
+        }
+        
+        /* Smooth scrolling */
+        html {
+            scroll-behavior: smooth;
+        }
+        
+        /* Section anchors for navigation */
+        .section-anchor {
+            scroll-margin-top: 80px;
+        }
+        
+        /* Responsive design for navigation */
+        @media (max-width: 1200px) {
+            .jump-nav {
+                display: none;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .toc-container {
+                padding: 10px 15px;
+            }
+            
+            .toc-header {
+                flex-direction: column;
+                gap: 10px;
+                align-items: flex-start;
+            }
+            
+            .toc-links {
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s;
+            }
+            
+            .toc-container.expanded .toc-links {
+                max-height: 500px;
+            }
+        }
+        
+        @media print {
+            .toc-container,
+            .jump-nav,
+            .view-toggle,
+            .section-toggle,
+            .print-button {
+                display: none !important;
+            }
+            
+            .chart-section.collapsible.collapsed .section-body {
+                display: block !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -2908,6 +3157,48 @@ def generate_html_report(days=90, output_path=None):
             <h1>📊 Nightscout CGM Report</h1>
             <p class="subtitle" id="reportSubtitle">%(first_date)s to %(last_date)s (%(days)s days) • %(readings)s readings</p>
         </header>
+        
+        <!-- Table of Contents with View Toggle -->
+        <div class="toc-container">
+            <div class="toc-header">
+                <div class="toc-title">📑 Quick Navigation</div>
+                <div class="view-toggle">
+                    <button onclick="setViewMode('summary')" id="summaryBtn">📋 Summary</button>
+                    <button onclick="setViewMode('full')" id="fullBtn" class="active">📊 Full Report</button>
+                </div>
+            </div>
+            <div class="toc-links">
+                <a href="#section-compare" class="toc-link">⚖️ Compare</a>
+                <a href="#section-alerts" class="toc-link">⚠️ Alerts</a>
+                <a href="#section-tir" class="toc-link">🎯 Time in Range</a>
+                <a href="#section-modal" class="toc-link">📈 Modal Day</a>
+                <a href="#section-daily" class="toc-link">📅 Daily Trends</a>
+                <a href="#section-dow" class="toc-link">📆 Day of Week</a>
+                <a href="#section-distribution" class="toc-link">📊 Distribution</a>
+                <a href="#section-heatmap" class="toc-link">🔥 Heatmap</a>
+                <a href="#section-weekly" class="toc-link">📉 Weekly</a>
+            </div>
+        </div>
+        
+        <!-- Jump Navigation - Sticky Side Panel -->
+        <div class="jump-nav">
+            <a href="#section-tir" class="jump-nav-item" title="Time in Range">
+                🎯
+                <span class="tooltip">Time in Range</span>
+            </a>
+            <a href="#section-modal" class="jump-nav-item" title="Modal Day">
+                📈
+                <span class="tooltip">Modal Day</span>
+            </a>
+            <a href="#section-daily" class="jump-nav-item" title="Daily Trends">
+                📅
+                <span class="tooltip">Daily Trends</span>
+            </a>
+            <a href="#section-heatmap" class="jump-nav-item" title="Heatmap">
+                🔥
+                <span class="tooltip">Heatmap</span>
+            </a>
+        </div>
         
         <!-- Date Range Controls (tally-style) -->
         <div class="date-controls">
@@ -2953,7 +3244,7 @@ def generate_html_report(days=90, output_path=None):
         </div>
         
         <!-- Compare Periods (collapsed by default) -->
-        <div class="compare-section collapsed" id="compareSection">
+        <div class="compare-section collapsed section-anchor full-only" id="section-compare">
             <div class="compare-header" onclick="toggleCompareSection()">
                 <h2>Compare Periods</h2>
                 <span class="compare-toggle">▶</span>
@@ -2984,7 +3275,7 @@ def generate_html_report(days=90, output_path=None):
         </div>
         
         <!-- Trend Alerts (collapsed by default) -->
-        <div class="alerts-section collapsed" id="alertsSection">
+        <div class="alerts-section collapsed section-anchor full-only" id="section-alerts">
             <div class="alerts-header" onclick="toggleAlertsSection()">
                 <h2>Trend Alerts</h2>
                 <div class="alerts-summary" id="alertsSummary"></div>
@@ -3004,7 +3295,7 @@ def generate_html_report(days=90, output_path=None):
         </div>
         
         <!-- Time in Range Pie Chart -->
-        <div class="chart-section">
+        <div class="chart-section section-anchor" id="section-tir">
             <h2>Time in Range Distribution</h2>
             <div class="chart-container">
                 <canvas id="tirPieChart"></canvas>
@@ -3019,7 +3310,7 @@ def generate_html_report(days=90, output_path=None):
         </div>
         
         <!-- Modal Day Chart -->
-        <div class="chart-section">
+        <div class="chart-section section-anchor" id="section-modal">
             <h2>Modal Day (Typical 24-Hour Profile)</h2>
             <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.9rem;">
                 Shows your typical glucose pattern throughout the day. The shaded area represents the 10th-90th percentile range.
@@ -3031,32 +3322,47 @@ def generate_html_report(days=90, output_path=None):
         
         <div class="grid-2">
             <!-- Daily Trend -->
-            <div class="chart-section">
-                <h2>Daily Average & Time in Range</h2>
-                <div class="chart-container">
-                    <canvas id="dailyTrendChart"></canvas>
+            <div class="chart-section collapsible collapsed section-anchor full-only" id="section-daily">
+                <div class="section-header" onclick="toggleSection('section-daily')">
+                    <h2>Daily Average & Time in Range</h2>
+                    <span class="section-toggle">▶</span>
+                </div>
+                <div class="section-body">
+                    <div class="chart-container">
+                        <canvas id="dailyTrendChart"></canvas>
+                    </div>
                 </div>
             </div>
             
             <!-- Day of Week -->
-            <div class="chart-section">
-                <h2>Day of Week Comparison</h2>
-                <div class="chart-container">
-                    <canvas id="dowChart"></canvas>
+            <div class="chart-section collapsible collapsed section-anchor full-only" id="section-dow">
+                <div class="section-header" onclick="toggleSection('section-dow')">
+                    <h2>Day of Week Comparison</h2>
+                    <span class="section-toggle">▶</span>
+                </div>
+                <div class="section-body">
+                    <div class="chart-container">
+                        <canvas id="dowChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- Glucose Distribution -->
-        <div class="chart-section">
-            <h2>Glucose Distribution</h2>
-            <div class="chart-container">
-                <canvas id="histogramChart"></canvas>
+        <div class="chart-section collapsible collapsed section-anchor full-only" id="section-distribution">
+            <div class="section-header" onclick="toggleSection('section-distribution')">
+                <h2>Glucose Distribution</h2>
+                <span class="section-toggle">▶</span>
+            </div>
+            <div class="section-body">
+                <div class="chart-container">
+                    <canvas id="histogramChart"></canvas>
+                </div>
             </div>
         </div>
         
         <!-- Heatmap -->
-        <div class="chart-section">
+        <div class="chart-section section-anchor" id="section-heatmap">
             <h2>Time-in-Range Heatmap (Day × Hour)</h2>
             <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.9rem;">
                 Darker green = higher time in range. Red/orange = problem areas needing attention.
@@ -3069,10 +3375,15 @@ def generate_html_report(days=90, output_path=None):
         </div>
         
         <!-- Weekly Summary -->
-        <div class="chart-section">
-            <h2>Weekly Summary</h2>
-            <div class="chart-container">
-                <canvas id="weeklyChart"></canvas>
+        <div class="chart-section collapsible collapsed section-anchor full-only" id="section-weekly">
+            <div class="section-header" onclick="toggleSection('section-weekly')">
+                <h2>Weekly Summary</h2>
+                <span class="section-toggle">▶</span>
+            </div>
+            <div class="section-body">
+                <div class="chart-container">
+                    <canvas id="weeklyChart"></canvas>
+                </div>
             </div>
         </div>
         
@@ -3928,7 +4239,7 @@ def generate_html_report(days=90, output_path=None):
             const hiddenContainer = document.getElementById('hiddenAlerts');
             const expandBtn = document.getElementById('alertsExpand');
             const summaryDiv = document.getElementById('alertsSummary');
-            const section = document.getElementById('alertsSection');
+            const section = document.getElementById('section-alerts');
             
             if (!allAlerts || allAlerts.length === 0) {
                 container.innerHTML = `
@@ -4170,12 +4481,12 @@ def generate_html_report(days=90, output_path=None):
         }
         
         function toggleAlertsSection() {
-            const section = document.getElementById('alertsSection');
+            const section = document.getElementById('section-alerts');
             section.classList.toggle('collapsed');
         }
         
         function toggleCompareSection() {
-            const section = document.getElementById('compareSection');
+            const section = document.getElementById('section-compare');
             section.classList.toggle('collapsed');
             
             // Run comparison on first open
@@ -4184,6 +4495,75 @@ def generate_html_report(days=90, output_path=None):
                 window.comparisonRun = true;
             }
         }
+        
+        // Generic toggle for collapsible chart sections
+        function toggleSection(sectionId) {
+            const section = document.getElementById(sectionId);
+            section.classList.toggle('collapsed');
+        }
+        
+        // View mode toggle (Summary vs Full Report)
+        function setViewMode(mode) {
+            const body = document.body;
+            const summaryBtn = document.getElementById('summaryBtn');
+            const fullBtn = document.getElementById('fullBtn');
+            
+            if (mode === 'summary') {
+                body.classList.add('summary-view');
+                summaryBtn.classList.add('active');
+                fullBtn.classList.remove('active');
+            } else {
+                body.classList.remove('summary-view');
+                fullBtn.classList.add('active');
+                summaryBtn.classList.remove('active');
+            }
+            
+            // Scroll to top when changing views
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+        
+        // Active section highlighting for TOC and jump nav
+        function updateActiveSection() {
+            const sections = document.querySelectorAll('.section-anchor');
+            const tocLinks = document.querySelectorAll('.toc-link');
+            const jumpNavItems = document.querySelectorAll('.jump-nav-item');
+            
+            let activeSection = null;
+            const scrollPosition = window.scrollY + 100;
+            
+            sections.forEach(section => {
+                const rect = section.getBoundingClientRect();
+                const sectionTop = rect.top + window.scrollY;
+                
+                if (scrollPosition >= sectionTop) {
+                    activeSection = section.id;
+                }
+            });
+            
+            if (activeSection) {
+                // Update TOC links
+                tocLinks.forEach(link => {
+                    if (link.getAttribute('href') === '#' + activeSection) {
+                        link.classList.add('active');
+                    } else {
+                        link.classList.remove('active');
+                    }
+                });
+                
+                // Update jump nav items
+                jumpNavItems.forEach(item => {
+                    if (item.getAttribute('href') === '#' + activeSection) {
+                        item.classList.add('active');
+                    } else {
+                        item.classList.remove('active');
+                    }
+                });
+            }
+        }
+        
+        // Initialize navigation highlighting on scroll
+        window.addEventListener('scroll', updateActiveSection);
+        window.addEventListener('load', updateActiveSection);
         
         function runComparison() {
             const period1Select = document.getElementById('comparePeriod1');
