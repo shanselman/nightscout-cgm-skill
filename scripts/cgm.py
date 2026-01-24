@@ -1779,6 +1779,96 @@ def find_worst_days(days=21, hour_start=None, hour_end=None, limit=5):
     }
 
 
+def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
+    """
+    Generate a human-readable executive summary based on CGM metrics.
+    
+    Args:
+        tir_in_range: Time in range percentage (0-100)
+        cv: Coefficient of variation percentage
+        alerts: List of detected trend alerts (from detect_trend_alerts)
+        gmi: GMI (Estimated A1C) value (optional)
+    
+    Returns:
+        Dictionary with 'status', 'emoji', and 'message' keys
+    """
+    # Determine overall status based on TIR and CV
+    # TIR targets: >70% is excellent, 50-70% is good, <50% needs work
+    # CV targets: <36% is stable, >36% is high variability
+    
+    status = "stable"
+    emoji = "✓"
+    messages = []
+    
+    # Assess TIR
+    if tir_in_range >= 70:
+        tir_status = "excellent"
+        emoji = "✅"
+    elif tir_in_range >= 50:
+        tir_status = "good"
+        emoji = "✓"
+    else:
+        tir_status = "needs_attention"
+        emoji = "⚠️"
+        status = "needs_attention"
+    
+    # Assess variability
+    if cv > 36:
+        status = "needs_attention"
+        emoji = "⚠️"
+        messages.append("high variability")
+    
+    # Check for critical alerts (high severity)
+    high_severity_alerts = [a for a in alerts if a.get("severity") == "high"]
+    medium_severity_alerts = [a for a in alerts if a.get("severity") == "medium"]
+    
+    if high_severity_alerts:
+        status = "critical"
+        emoji = "🔴"
+        # Find most critical issue
+        alert = high_severity_alerts[0]
+        if "recurring_lows" in alert.get("category", ""):
+            messages.append(f"{alert['message']} - see Trend Alerts")
+    elif medium_severity_alerts and status != "needs_attention":
+        status = "needs_attention"
+        emoji = "⚠️"
+    
+    # Check for positive trends (improvements)
+    improvements = [a for a in alerts if a.get("category") == "trend_improvement"]
+    if improvements and status == "stable":
+        improvement = improvements[0]
+        change = improvement.get("details", {}).get("change", 0)
+        if change >= 5:
+            emoji = "📈"
+            messages.append(f"TIR up {change:.1f}% from previous period")
+    
+    # Generate primary message based on status
+    if messages:
+        # Use specific message from alerts
+        message = messages[0]
+    elif status == "critical":
+        message = "Critical patterns detected - review Trend Alerts immediately"
+    elif status == "needs_attention":
+        if cv > 36:
+            message = "Glucose variability needs attention"
+        else:
+            message = "Some concerning patterns detected - see Trend Alerts"
+    elif tir_status == "excellent":
+        message = "Your glucose control is excellent this period"
+    elif tir_status == "good":
+        message = "Your glucose control is stable this period"
+    else:
+        message = "Your glucose control is stable this period"
+    
+    return {
+        "status": status,
+        "emoji": emoji,
+        "message": message,
+        "tir": tir_in_range,
+        "cv": cv
+    }
+
+
 def generate_html_report(days=90, output_path=None):
     """
     Generate a comprehensive, self-contained HTML report with interactive charts.
@@ -2010,6 +2100,16 @@ def generate_html_report(days=90, output_path=None):
     # =========================================================================
     alerts_result = detect_trend_alerts(days, min_occurrences=2)
     alerts = alerts_result.get("alerts", []) if "error" not in alerts_result else []
+    
+    # =========================================================================
+    # Generate Executive Summary
+    # =========================================================================
+    executive_summary = generate_executive_summary(
+        tir_in_range=tir_data["in_range"],
+        cv=cv,
+        alerts=alerts,
+        gmi=gmi
+    )
     
     # =========================================================================
     # HTML Template with embedded Chart.js
@@ -2530,6 +2630,47 @@ def generate_html_report(days=90, output_path=None):
             font-size: 0.9rem;
         }
         
+        /* Executive Summary */
+        .executive-summary {
+            background: linear-gradient(135deg, var(--bg-secondary) 0%%, var(--bg-card) 100%%);
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin: 25px 0;
+            border-left: 4px solid var(--success);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .executive-summary.needs-attention {
+            border-left-color: var(--warning);
+        }
+        
+        .executive-summary.critical {
+            border-left-color: var(--danger);
+        }
+        
+        .executive-summary-content {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .executive-summary-emoji {
+            font-size: 2rem;
+            flex-shrink: 0;
+        }
+        
+        .executive-summary-text {
+            flex: 1;
+        }
+        
+        .executive-summary-message {
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin: 0;
+            line-height: 1.4;
+        }
+        
         /* Compare Section */
         .compare-section {
             background: var(--bg-secondary);
@@ -2816,6 +2957,14 @@ def generate_html_report(days=90, output_path=None):
                 border-color: #666 !important;
             }
             
+            .executive-summary {
+                background: white !important;
+                border: 2px solid #666 !important;
+                page-break-inside: avoid;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+            
             .stat-card {
                 background: #f9f9f9 !important;
                 border: 1px solid #ccc !important;
@@ -2930,6 +3079,16 @@ def generate_html_report(days=90, output_path=None):
         <div class="disclaimer">
             ⚠️ <strong>Not medical advice.</strong> This report is for informational purposes only. 
             Always consult your healthcare provider for diabetes management decisions.
+        </div>
+        
+        <!-- Executive Summary -->
+        <div class="executive-summary %(summary_status_class)s">
+            <div class="executive-summary-content">
+                <div class="executive-summary-emoji">%(summary_emoji)s</div>
+                <div class="executive-summary-text">
+                    <p class="executive-summary-message">%(summary_message)s</p>
+                </div>
+            </div>
         </div>
         
         <!-- Key Metrics -->
@@ -4431,7 +4590,10 @@ def generate_html_report(days=90, output_path=None):
         "all_readings_json": json.dumps(all_readings_data),
         "is_mmol_js": "true" if is_mmol else "false",
         "initial_days": days,
-        "alerts_json": json.dumps(alerts)
+        "alerts_json": json.dumps(alerts),
+        "summary_emoji": executive_summary["emoji"],
+        "summary_message": executive_summary["message"],
+        "summary_status_class": executive_summary["status"]
     }
     
     # Determine output path
