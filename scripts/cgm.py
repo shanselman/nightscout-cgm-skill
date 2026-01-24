@@ -2892,7 +2892,7 @@ def generate_html_report(days=90, output_path=None):
         .agp-button {
             position: fixed;
             bottom: 20px;
-            right: 220px;
+            right: 220px; /* Adjusted from 230px to account for smaller default button size */
             background: #059669;
             color: white;
             text-decoration: none;
@@ -4404,6 +4404,7 @@ def generate_html_report(days=90, output_path=None):
         }
         
         // Option 4: Auto-hide floating buttons after 3 seconds of inactivity
+        // Using IIFE to encapsulate scope and prevent duplicate event listeners
         (function() {
             let hideTimeout;
             const buttons = [
