@@ -4,6 +4,10 @@ cgm_data.db
 
 # Generated reports (contain personal health data)
 nightscout_report.html
+test_*.html
+
+# Test generation scripts
+generate_test_report.py
 
 # Python
 __pycache__/

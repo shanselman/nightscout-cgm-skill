@@ -3154,6 +3154,13 @@ def generate_html_report(days=90, output_path=None):
         // Chart instances (for updates)
         let tirChart, modalChart, dailyChart, dowChart, histChart, weeklyChart;
         
+        // Trend indicators
+        const trendIndicators = {
+            up: { emoji: '📈', arrow: '↑' },
+            down: { emoji: '📉', arrow: '↓' },
+            stable: { emoji: '➡️', arrow: '→' }
+        };
+        
         // Colors
         const colors = {
             veryLow: '#1d4ed8',
@@ -3953,21 +3960,25 @@ def generate_html_report(days=90, output_path=None):
                                     
                                     // Week-over-week trend
                                     if (week.tir_change !== null && week.tir_change !== undefined) {
-                                        const arrow = week.tir_change > 0 ? '↑' : week.tir_change < 0 ? '↓' : '→';
+                                        const trend = week.tir_change > 0 ? trendIndicators.up : 
+                                                     week.tir_change < 0 ? trendIndicators.down : 
+                                                     trendIndicators.stable;
                                         const sign = week.tir_change > 0 ? '+' : '';
                                         lines.push('');
-                                        lines.push(`Trend: ${arrow} ${sign}${week.tir_change}%% vs prev week`);
+                                        // Note: %% is escaped for Python string formatting
+                                        lines.push(`Trend: ${trend.arrow} ${sign}${week.tir_change}%% vs prev week`);
                                     }
                                     
                                     // Best day
                                     if (week.best_day && week.best_day_tir !== null) {
+                                        // Note: %% is escaped for Python string formatting
                                         lines.push(`Best day: ${week.best_day} (${week.best_day_tir}%% TIR)`);
                                     }
                                     
                                     // Daily TIR mini sparkline (text-based)
                                     if (week.daily_tir && week.daily_tir.length > 0) {
-                                        const validDays = week.daily_tir.filter(v => v !== null);
-                                        if (validDays.length > 0) {
+                                        // Check if there's any valid data
+                                        if (week.daily_tir.some(v => v !== null)) {
                                             const sparkline = week.daily_tir.map(v => {
                                                 if (v === null) return '·';
                                                 if (v >= 80) return '█';
@@ -4017,9 +4028,12 @@ def generate_html_report(days=90, output_path=None):
             let html = '<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px;">';
             
             weeklyStats.forEach((week, idx) => {
-                const trendArrow = week.tir_change > 0 ? '📈' : week.tir_change < 0 ? '📉' : '➡️';
+                const trend = week.tir_change > 0 ? trendIndicators.up : 
+                             week.tir_change < 0 ? trendIndicators.down : 
+                             trendIndicators.stable;
+                // Note: %% is escaped for Python string formatting
                 const trendText = week.tir_change !== null && week.tir_change !== undefined
-                    ? `${trendArrow} ${week.tir_change > 0 ? '+' : ''}${week.tir_change}%%`
+                    ? `${trend.emoji} ${week.tir_change > 0 ? '+' : ''}${week.tir_change}%%`
                     : '—';
                 
                 const bestDayText = week.best_day && week.best_day_tir !== null
