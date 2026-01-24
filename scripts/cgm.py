@@ -1792,19 +1792,26 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
     Returns:
         Dictionary with 'status', 'emoji', and 'message' keys
     """
-    # Determine overall status based on TIR and CV
-    # TIR targets: >70% is excellent, 50-70% is good, <50% needs work
-    # CV targets: <36% is stable, >36% is high variability
+    # Clinical thresholds for assessment
+    # TIR thresholds based on ADA/EASD consensus guidelines
+    TIR_EXCELLENT = 70  # >70% TIR is the recommended target
+    TIR_GOOD = 50       # 50-70% indicates reasonable control
+    
+    # CV threshold from international consensus on CGM metrics
+    CV_STABLE = 36      # <36% CV indicates stable glucose levels
+    
+    # Improvement threshold for highlighting positive trends
+    SIGNIFICANT_TIR_IMPROVEMENT = 5  # 5% or more improvement is clinically meaningful
     
     status = "stable"
     emoji = "✓"
     messages = []
     
     # Assess TIR
-    if tir_in_range >= 70:
+    if tir_in_range >= TIR_EXCELLENT:
         tir_status = "excellent"
         emoji = "✅"
-    elif tir_in_range >= 50:
+    elif tir_in_range >= TIR_GOOD:
         tir_status = "good"
         emoji = "✓"
     else:
@@ -1813,7 +1820,7 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
         status = "needs_attention"
     
     # Assess variability
-    if cv > 36:
+    if cv > CV_STABLE:
         status = "needs_attention"
         emoji = "⚠️"
         messages.append("high variability")
@@ -1825,10 +1832,9 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
     if high_severity_alerts:
         status = "critical"
         emoji = "🔴"
-        # Find most critical issue
+        # Include message from the first high severity alert
         alert = high_severity_alerts[0]
-        if "recurring_lows" in alert.get("category", ""):
-            messages.append(f"{alert['message']} - see Trend Alerts")
+        messages.append(f"{alert['message']} - see Trend Alerts")
     elif medium_severity_alerts and status != "needs_attention":
         status = "needs_attention"
         emoji = "⚠️"
@@ -1838,7 +1844,7 @@ def generate_executive_summary(tir_in_range, cv, alerts, gmi=None):
     if improvements and status == "stable":
         improvement = improvements[0]
         change = improvement.get("details", {}).get("change", 0)
-        if change >= 5:
+        if change >= SIGNIFICANT_TIR_IMPROVEMENT:
             emoji = "📈"
             messages.append(f"TIR up {change:.1f}% from previous period")
     
