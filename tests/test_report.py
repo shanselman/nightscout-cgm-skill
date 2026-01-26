@@ -865,3 +865,174 @@ class TestGenerateAgpReport:
         assert "tir-in-range" in content
         assert "tir-high" in content
         assert "tir-very-high" in content
+
+
+class TestExecutiveSummary:
+    """Tests for executive summary feature."""
+    
+    def test_generate_executive_summary_excellent_control(self, cgm_module):
+        """Should generate positive summary for excellent TIR."""
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=75.0,
+            cv=30.0,
+            alerts=[],
+            gmi=6.8
+        )
+        
+        assert summary["status"] == "stable"
+        assert summary["emoji"] == "✅"
+        assert "excellent" in summary["message"].lower()
+        assert summary["tir"] == 75.0
+        assert summary["cv"] == 30.0
+    
+    def test_generate_executive_summary_good_control(self, cgm_module):
+        """Should generate positive summary for good TIR."""
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=60.0,
+            cv=32.0,
+            alerts=[],
+            gmi=7.2
+        )
+        
+        assert summary["status"] == "stable"
+        assert summary["emoji"] == "✓"
+        assert "stable" in summary["message"].lower()
+    
+    def test_generate_executive_summary_needs_attention(self, cgm_module):
+        """Should flag low TIR as needs attention."""
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=45.0,
+            cv=30.0,
+            alerts=[],
+            gmi=7.8
+        )
+        
+        assert summary["status"] == "needs_attention"
+        assert summary["emoji"] == "⚠️"
+    
+    def test_generate_executive_summary_high_variability(self, cgm_module):
+        """Should flag high CV as needs attention."""
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=65.0,
+            cv=40.0,
+            alerts=[],
+            gmi=7.0
+        )
+        
+        assert summary["status"] == "needs_attention"
+        assert summary["emoji"] == "⚠️"
+        assert "variability" in summary["message"].lower()
+    
+    def test_generate_executive_summary_with_critical_alerts(self, cgm_module):
+        """Should escalate to critical status with high severity alerts."""
+        alerts = [{
+            "severity": "high",
+            "category": "recurring_lows",
+            "message": "Monday morning has recurring lows"
+        }]
+        
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=60.0,
+            cv=30.0,
+            alerts=alerts,
+            gmi=7.0
+        )
+        
+        assert summary["status"] == "critical"
+        assert summary["emoji"] == "🔴"
+        assert "Monday morning" in summary["message"]
+    
+    def test_generate_executive_summary_with_improvement(self, cgm_module):
+        """Should highlight TIR improvements."""
+        alerts = [{
+            "severity": "low",
+            "category": "trend_improvement",
+            "message": "Your control has improved 7.5% in recent weeks",
+            "details": {
+                "change": 7.5,
+                "recent_tir": 70.0,
+                "older_tir": 62.5
+            }
+        }]
+        
+        summary = cgm_module.generate_executive_summary(
+            tir_in_range=70.0,
+            cv=30.0,
+            alerts=alerts,
+            gmi=6.9
+        )
+        
+        assert summary["emoji"] == "📈"
+        assert "7.5%" in summary["message"]
+    
+    def test_html_contains_executive_summary_section(self, cgm_module, populated_db, tmp_path):
+        """Generated HTML should include executive summary section."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        assert "executive-summary" in content
+        assert "executive-summary-content" in content
+        assert "executive-summary-emoji" in content
+        assert "executive-summary-message" in content
+    
+    def test_executive_summary_appears_before_stats(self, cgm_module, populated_db, tmp_path):
+        """Executive summary should appear before stats grid."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        # Look for the HTML element, not the CSS class
+        summary_pos = content.find('<div class="executive-summary')
+        stats_pos = content.find('<div class="stats-grid">')
+        
+        assert summary_pos > 0
+        assert stats_pos > 0
+        assert summary_pos < stats_pos
+    
+    def test_executive_summary_css_styling(self, cgm_module, populated_db, tmp_path):
+        """Executive summary should have proper CSS styling."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        
+        # Check for CSS classes
+        assert ".executive-summary {" in content
+        assert ".executive-summary.needs-attention {" in content
+        assert ".executive-summary.critical {" in content
+        assert ".executive-summary-emoji {" in content
+        assert ".executive-summary-message {" in content
