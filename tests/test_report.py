@@ -55,6 +55,25 @@ class TestGenerateHtmlReport:
         assert "chart.js" in content.lower()
         assert "<canvas" in content
     
+    def test_html_contains_annotation_plugin(self, cgm_module, populated_db, tmp_path):
+        """Generated HTML should include Chart.js annotation plugin for target range lines."""
+        output_path = tmp_path / "test_report.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_html_report(
+                            days=7,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        assert "chartjs-plugin-annotation" in content.lower()
+    
     def test_html_contains_key_sections(self, cgm_module, populated_db, tmp_path):
         """Generated HTML should contain all key sections."""
         output_path = tmp_path / "test_report.html"
@@ -763,6 +782,25 @@ class TestGenerateAgpReport:
         assert "p50" in content or "50th" in content or "Median" in content
         assert "p75" in content or "75th" in content
         assert "p95" in content or "95th" in content
+    
+    def test_agp_contains_annotation_plugin(self, cgm_module, populated_db, tmp_path):
+        """AGP HTML should include Chart.js annotation plugin for target range lines."""
+        output_path = tmp_path / "test_agp.html"
+        
+        with patch.object(cgm_module, "DB_PATH", populated_db):
+            with patch.object(cgm_module, "ensure_data", return_value=True):
+                with patch.object(cgm_module, "use_mmol", return_value=False):
+                    with patch.object(cgm_module, "get_thresholds", return_value={
+                        "urgent_low": 55, "target_low": 70,
+                        "target_high": 180, "urgent_high": 250
+                    }):
+                        cgm_module.generate_agp_report(
+                            days=14,
+                            output_path=str(output_path)
+                        )
+        
+        content = output_path.read_text(encoding="utf-8")
+        assert "chartjs-plugin-annotation" in content.lower()
     
     def test_agp_returns_correct_result_structure(self, cgm_module, populated_db, tmp_path):
         """AGP result should have expected fields including unique_days."""

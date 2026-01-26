@@ -2063,6 +2063,7 @@ def generate_html_report(days=90, output_path=None):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Nightscout CGM Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
         :root {
             --bg-primary: #1a1a2e;
@@ -4655,6 +4656,7 @@ def generate_agp_report(days=14, output_path=None):
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ambulatory Glucose Profile (AGP) Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
     <style>
         @media print {
             .no-print { display: none !important; }
