@@ -2172,6 +2172,8 @@ def generate_html_report(days=90, output_path=None):
             background: var(--bg-primary);
             color: var(--text-primary);
             line-height: 1.6;
+            /* Option 3: Add bottom padding to prevent content from being hidden behind floating buttons */
+            padding-bottom: 80px;
         }
         
         .container {
@@ -2897,41 +2899,62 @@ def generate_html_report(days=90, output_path=None):
             background: var(--accent);
             color: white;
             border: none;
-            padding: 12px 24px;
+            padding: 10px 20px;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.9rem;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             display: flex;
             align-items: center;
             gap: 8px;
             z-index: 1000;
-            transition: transform 0.2s, box-shadow 0.2s;
+            /* Option 1: Semi-transparent and smaller when not hovered */
+            opacity: 0.6;
+            /* Option 4: Auto-hide after inactivity */
+            transition: transform 0.3s, box-shadow 0.3s, opacity 0.3s, padding 0.3s, font-size 0.3s;
         }
         
         .print-button:hover {
+            /* Option 1: Full opacity and larger on hover */
+            opacity: 1;
+            padding: 12px 24px;
+            font-size: 1rem;
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        }
+        
+        /* Option 4: Auto-hide class */
+        .print-button.hidden,
+        .agp-button.hidden {
+            opacity: 0;
+            pointer-events: none;
         }
         
         .agp-button {
             position: fixed;
             bottom: 20px;
-            right: 230px;
+            right: 220px; /* Adjusted from 230px to account for smaller default button size */
             background: #059669;
             color: white;
             text-decoration: none;
-            padding: 12px 24px;
+            padding: 10px 20px;
             border-radius: 8px;
-            font-size: 1rem;
+            font-size: 0.9rem;
             line-height: normal;
             cursor: pointer;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
             z-index: 1000;
-            transition: transform 0.2s, box-shadow 0.2s;
+            /* Option 1: Semi-transparent and smaller when not hovered */
+            opacity: 0.6;
+            /* Option 4: Auto-hide after inactivity */
+            transition: transform 0.3s, box-shadow 0.3s, opacity 0.3s, padding 0.3s, font-size 0.3s;
         }
         
         .agp-button:hover {
+            /* Option 1: Full opacity and larger on hover */
+            opacity: 1;
+            padding: 12px 24px;
+            font-size: 1rem;
             transform: translateY(-2px);
             box-shadow: 0 6px 16px rgba(0,0,0,0.4);
         }
@@ -4420,6 +4443,53 @@ def generate_html_report(days=90, output_path=None):
             
             return parts.join(' • ');
         }
+        
+        // Option 4: Auto-hide floating buttons after 3 seconds of inactivity
+        // Using IIFE to encapsulate scope and prevent duplicate event listeners
+        (function() {
+            let hideTimeout;
+            const buttons = [
+                document.querySelector('.print-button'),
+                document.querySelector('.agp-button')
+            ];
+            
+            function showButtons() {
+                buttons.forEach(btn => {
+                    if (btn) btn.classList.remove('hidden');
+                });
+                
+                // Clear existing timeout
+                clearTimeout(hideTimeout);
+                
+                // Set new timeout to hide after 3 seconds
+                hideTimeout = setTimeout(() => {
+                    buttons.forEach(btn => {
+                        if (btn) btn.classList.add('hidden');
+                    });
+                }, 3000);
+            }
+            
+            // Show buttons on page load
+            showButtons();
+            
+            // Show buttons on mouse movement or scroll
+            document.addEventListener('mousemove', showButtons);
+            document.addEventListener('scroll', showButtons);
+            document.addEventListener('touchstart', showButtons);
+            
+            // Keep buttons visible when hovering over them
+            buttons.forEach(btn => {
+                if (btn) {
+                    btn.addEventListener('mouseenter', () => {
+                        clearTimeout(hideTimeout);
+                        btn.classList.remove('hidden');
+                    });
+                    btn.addEventListener('mouseleave', () => {
+                        showButtons(); // Restart the hide timer
+                    });
+                }
+            });
+        })();
     </script>
     
     <!-- Print Button and AGP Link -->
