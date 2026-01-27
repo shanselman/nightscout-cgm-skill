@@ -36,3 +36,4 @@ config.json
 *.html
 nightscout_report.html
 nightscout_agp_report.html
+coverage.json
