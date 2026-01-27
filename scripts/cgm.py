@@ -103,6 +103,139 @@ def get_thresholds():
 
 SKILL_DIR = Path(__file__).parent.parent
 DB_PATH = SKILL_DIR / "cgm_data.db"
+CONFIG_PATH = SKILL_DIR / "config.json"
+
+# Cached pump capabilities (None = not checked yet)
+_pump_capabilities = None
+
+
+def _load_config():
+    """Load configuration from config.json."""
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH) as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return {}
+
+
+def _save_config(config):
+    """Save configuration to config.json."""
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=2)
+    except IOError:
+        pass
+
+
+def detect_pump_capabilities():
+    """
+    Detect if this Nightscout instance has pump/treatment data.
+    Results are cached to avoid repeated API calls.
+    
+    Returns dict with:
+        has_treatments: bool - treatments endpoint has data
+        has_devicestatus: bool - devicestatus endpoint has data (Loop/OpenAPS)
+        has_profile: bool - profile endpoint has data
+        pump_info: dict or None - pump manufacturer/model if available
+        loop_info: dict or None - Loop/OpenAPS name/version if available
+    """
+    global _pump_capabilities
+    
+    # Check in-memory cache first
+    if _pump_capabilities is not None:
+        return _pump_capabilities
+    
+    # Check file cache (with 24-hour expiry)
+    config = _load_config()
+    cached = config.get("pump_capabilities")
+    if cached:
+        cached_time = cached.get("_checked_at")
+        if cached_time:
+            try:
+                checked = datetime.fromisoformat(cached_time.replace("Z", "+00:00"))
+                if datetime.now(timezone.utc) - checked < timedelta(hours=24):
+                    _pump_capabilities = cached
+                    return _pump_capabilities
+            except ValueError:
+                pass
+    
+    # Query the endpoints to detect capabilities
+    capabilities = {
+        "has_treatments": False,
+        "has_devicestatus": False,
+        "has_profile": False,
+        "pump_info": None,
+        "loop_info": None,
+        "_checked_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Check treatments endpoint
+    try:
+        resp = requests.get(f"{API_ROOT}/treatments.json", params={"count": 1}, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            capabilities["has_treatments"] = bool(data and len(data) > 0)
+    except requests.RequestException:
+        pass
+    
+    # Check devicestatus endpoint (Loop/OpenAPS data)
+    try:
+        resp = requests.get(f"{API_ROOT}/devicestatus.json", params={"count": 1}, timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data and len(data) > 0:
+                status = data[0]
+                # Check for pump info
+                pump = status.get("pump", {})
+                if pump and pump.get("manufacturer"):
+                    capabilities["has_devicestatus"] = True
+                    capabilities["pump_info"] = {
+                        "manufacturer": pump.get("manufacturer"),
+                        "model": pump.get("model")
+                    }
+                
+                # Check for Loop/OpenAPS info
+                loop = status.get("loop") or status.get("openaps")
+                if loop:
+                    capabilities["has_devicestatus"] = True
+                    capabilities["loop_info"] = {
+                        "name": loop.get("name", "Loop/OpenAPS"),
+                        "version": loop.get("version")
+                    }
+    except requests.RequestException:
+        pass
+    
+    # Check profile endpoint
+    try:
+        resp = requests.get(f"{API_ROOT}/profile.json", timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            if data and len(data) > 0:
+                # Check if profile has meaningful data (basal rates)
+                profile = data[0]
+                store = profile.get("store", {})
+                if store:
+                    default = store.get("Default") or store.get(list(store.keys())[0])
+                    if default and default.get("basal"):
+                        capabilities["has_profile"] = True
+    except requests.RequestException:
+        pass
+    
+    # Cache results
+    _pump_capabilities = capabilities
+    config["pump_capabilities"] = capabilities
+    _save_config(config)
+    
+    return capabilities
+
+
+def has_pump_data():
+    """Quick check if pump data is available. Returns True if any pump-related data exists."""
+    caps = detect_pump_capabilities()
+    return caps.get("has_devicestatus") or caps.get("has_treatments") or caps.get("has_profile")
+
 
 # Trend alert detection thresholds
 HIGH_SEVERITY_DAY_THRESHOLD = 3  # Number of unique days to trigger high severity
@@ -5150,6 +5283,360 @@ def generate_agp_report(days=14, output_path=None):
     }
 
 
+# =============================================================================
+# PUMP AND TREATMENT FUNCTIONS
+# =============================================================================
+
+def get_pump_status():
+    """Get current pump status including IOB, COB, and device info."""
+    # Check if pump data is available
+    caps = detect_pump_capabilities()
+    if not caps.get("has_devicestatus"):
+        return {
+            "error": "No pump data available",
+            "message": "This Nightscout instance doesn't appear to have pump/Loop data. "
+                      "Pump commands require Loop, OpenAPS, or similar closed-loop system uploading to Nightscout.",
+            "cgm_only": True
+        }
+    
+    try:
+        # Get latest device status
+        resp = requests.get(f"{API_ROOT}/devicestatus.json", params={"count": 1}, timeout=10)
+        resp.raise_for_status()
+        statuses = resp.json()
+        
+        if not statuses:
+            return {"error": "No device status data available"}
+        
+        status = statuses[0]
+        result = {
+            "timestamp": status.get("created_at"),
+        }
+        
+        # Extract pump info
+        pump = status.get("pump", {})
+        if pump:
+            result["pump"] = {
+                "manufacturer": pump.get("manufacturer"),
+                "model": pump.get("model"),
+                "suspended": pump.get("suspended", False),
+                "bolusing": pump.get("bolusing", False),
+            }
+        
+        # Extract Loop/OpenAPS info
+        loop = status.get("loop") or status.get("openaps", {})
+        if loop:
+            result["loop"] = {
+                "name": loop.get("name", "Loop"),
+                "version": loop.get("version"),
+            }
+            
+            # IOB (Insulin on Board)
+            iob_data = loop.get("iob", {})
+            if isinstance(iob_data, dict):
+                result["iob"] = {
+                    "value": round(iob_data.get("iob", 0), 2),
+                    "timestamp": iob_data.get("timestamp"),
+                    "unit": "U"
+                }
+            
+            # COB (Carbs on Board)
+            cob_data = loop.get("cob", {})
+            if isinstance(cob_data, dict):
+                result["cob"] = {
+                    "value": round(cob_data.get("cob", 0), 1),
+                    "timestamp": cob_data.get("timestamp"),
+                    "unit": "g"
+                }
+            
+            # Predicted glucose
+            predicted = loop.get("predicted", {})
+            if predicted:
+                values = predicted.get("values", [])
+                if values:
+                    result["predicted"] = {
+                        "start": predicted.get("startDate"),
+                        "current": convert_glucose(int(values[0])) if values else None,
+                        "eventual": convert_glucose(int(values[-1])) if values else None,
+                        "min": convert_glucose(int(min(values))) if values else None,
+                        "max": convert_glucose(int(max(values))) if values else None,
+                        "unit": get_unit_label()
+                    }
+            
+            # Recommended bolus
+            if "recommendedBolus" in loop:
+                result["recommended_bolus"] = {
+                    "value": round(loop["recommendedBolus"], 2),
+                    "unit": "U"
+                }
+            
+            # Last enacted action
+            enacted = loop.get("enacted", {})
+            if enacted:
+                result["last_enacted"] = {
+                    "timestamp": enacted.get("timestamp"),
+                    "rate": enacted.get("rate"),
+                    "duration": enacted.get("duration"),
+                    "bolus": enacted.get("bolusVolume"),
+                }
+        
+        # Override status
+        override = status.get("override", {})
+        if override and override.get("active"):
+            result["override"] = {
+                "active": True,
+                "name": override.get("name"),
+                "timestamp": override.get("timestamp"),
+            }
+        
+        # Uploader (phone) info
+        uploader = status.get("uploader", {})
+        if uploader:
+            result["uploader"] = {
+                "name": uploader.get("name"),
+                "battery": uploader.get("battery"),
+            }
+        
+        return result
+        
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch pump status: {e}"}
+
+
+def get_treatments(hours=24, event_types=None):
+    """Get recent treatments (boluses, temp basals, carbs).
+    
+    Args:
+        hours: Number of hours to look back (default: 24)
+        event_types: List of event types to filter (e.g., ["Correction Bolus", "Meal Bolus", "Carb Correction"])
+    """
+    # Check if treatment data is available
+    caps = detect_pump_capabilities()
+    if not caps.get("has_treatments"):
+        return {
+            "error": "No treatment data available",
+            "message": "This Nightscout instance doesn't appear to have treatment data. "
+                      "Treatment commands require a pump system or manual entries uploading to Nightscout.",
+            "cgm_only": True
+        }
+    
+    try:
+        # Calculate time range
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+        cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+        
+        resp = requests.get(
+            f"{API_ROOT}/treatments.json",
+            params={"count": 500, "find[created_at][$gte]": cutoff_str},
+            timeout=15
+        )
+        resp.raise_for_status()
+        treatments = resp.json()
+        
+        if not treatments:
+            return {"treatments": [], "summary": {"total": 0}}
+        
+        # Categorize treatments
+        boluses = []
+        temp_basals = []
+        carbs = []
+        other = []
+        
+        total_insulin = 0
+        total_carbs = 0
+        
+        for t in treatments:
+            event_type = t.get("eventType", "")
+            
+            # Filter by event type if specified
+            if event_types and event_type not in event_types:
+                continue
+            
+            entry = {
+                "timestamp": t.get("created_at"),
+                "event_type": event_type,
+            }
+            
+            if "Bolus" in event_type or t.get("insulin"):
+                insulin = t.get("insulin", 0)
+                if insulin:
+                    entry["insulin"] = round(insulin, 2)
+                    entry["insulin_type"] = t.get("insulinType")
+                    entry["automatic"] = t.get("automatic", False)
+                    total_insulin += insulin
+                    boluses.append(entry)
+            
+            elif event_type == "Temp Basal":
+                entry["rate"] = t.get("rate", t.get("absolute", 0))
+                entry["duration"] = t.get("duration")
+                entry["automatic"] = t.get("automatic", False)
+                temp_basals.append(entry)
+            
+            elif t.get("carbs"):
+                entry["carbs"] = t.get("carbs")
+                entry["absorption_time"] = t.get("absorptionTime")
+                total_carbs += t.get("carbs", 0)
+                carbs.append(entry)
+            
+            else:
+                entry["notes"] = t.get("notes")
+                other.append(entry)
+        
+        return {
+            "period_hours": hours,
+            "boluses": boluses[:20],  # Limit to most recent 20
+            "temp_basals": temp_basals[:20],
+            "carbs": carbs[:20],
+            "other": other[:10] if other else [],
+            "summary": {
+                "total_boluses": len(boluses),
+                "total_temp_basals": len(temp_basals),
+                "total_carb_entries": len(carbs),
+                "total_insulin": round(total_insulin, 2),
+                "total_carbs": round(total_carbs, 1),
+                "unit_insulin": "U",
+                "unit_carbs": "g"
+            }
+        }
+        
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch treatments: {e}"}
+
+
+def get_profile():
+    """Get pump profile settings (basal rates, ISF, carb ratios, targets)."""
+    # Check if profile data is available
+    caps = detect_pump_capabilities()
+    if not caps.get("has_profile"):
+        return {
+            "error": "No profile data available",
+            "message": "This Nightscout instance doesn't appear to have pump profile data. "
+                      "Profile commands require Loop, OpenAPS, or similar system uploading settings to Nightscout.",
+            "cgm_only": True
+        }
+    
+    try:
+        resp = requests.get(f"{API_ROOT}/profile.json", timeout=10)
+        resp.raise_for_status()
+        profiles = resp.json()
+        
+        if not profiles:
+            return {"error": "No profile data available"}
+        
+        # Get the most recent profile
+        profile = profiles[0]
+        store = profile.get("store", {})
+        
+        # Find the default/active profile
+        default_profile = store.get("Default") or store.get(list(store.keys())[0]) if store else {}
+        
+        result = {
+            "units": profile.get("units", default_profile.get("units", "mg/dL")),
+            "dia": default_profile.get("dia", 6),  # Duration of Insulin Action
+        }
+        
+        # Basal rates
+        basal = default_profile.get("basal", [])
+        if basal:
+            result["basal_rates"] = [
+                {
+                    "time": b.get("time"),
+                    "rate": b.get("value"),
+                    "unit": "U/hr"
+                }
+                for b in basal
+            ]
+            # Calculate total daily basal
+            total_basal = 0
+            for i, b in enumerate(basal):
+                start_seconds = b.get("timeAsSeconds", 0)
+                if i + 1 < len(basal):
+                    end_seconds = basal[i + 1].get("timeAsSeconds", 86400)
+                else:
+                    end_seconds = 86400
+                duration_hours = (end_seconds - start_seconds) / 3600
+                total_basal += b.get("value", 0) * duration_hours
+            result["total_daily_basal"] = round(total_basal, 2)
+        
+        # Insulin Sensitivity Factor (ISF/Correction Factor)
+        sens = default_profile.get("sens", [])
+        if sens:
+            result["isf"] = [
+                {
+                    "time": s.get("time"),
+                    "value": convert_glucose(s.get("value", 0)),
+                    "unit": f"{get_unit_label()}/U"
+                }
+                for s in sens
+            ]
+        
+        # Carb Ratios
+        carbratio = default_profile.get("carbratio", [])
+        if carbratio:
+            result["carb_ratios"] = [
+                {
+                    "time": c.get("time"),
+                    "value": c.get("value"),
+                    "unit": "g/U"
+                }
+                for c in carbratio
+            ]
+        
+        # Target ranges
+        target_low = default_profile.get("target_low", [])
+        target_high = default_profile.get("target_high", [])
+        if target_low or target_high:
+            result["targets"] = []
+            for i, low in enumerate(target_low):
+                high_val = target_high[i].get("value") if i < len(target_high) else low.get("value")
+                result["targets"].append({
+                    "time": low.get("time"),
+                    "low": convert_glucose(low.get("value", 70)),
+                    "high": convert_glucose(high_val or 180),
+                    "unit": get_unit_label()
+                })
+        
+        # Loop settings if available
+        loop_settings = profile.get("loopSettings", {})
+        if loop_settings:
+            result["loop_settings"] = {
+                "maximum_bolus": loop_settings.get("maximumBolus"),
+                "minimum_bg_guard": convert_glucose(loop_settings.get("minimumBGGuard", 0)) if loop_settings.get("minimumBGGuard") else None,
+                "dosing_enabled": loop_settings.get("dosingEnabled"),
+            }
+            
+            # Pre-meal target
+            pre_meal = loop_settings.get("preMealTargetRange", [])
+            if pre_meal and len(pre_meal) >= 2:
+                result["loop_settings"]["pre_meal_target"] = {
+                    "low": convert_glucose(pre_meal[0]),
+                    "high": convert_glucose(pre_meal[1]),
+                    "unit": get_unit_label()
+                }
+            
+            # Override presets
+            presets = loop_settings.get("overridePresets", [])
+            if presets:
+                result["override_presets"] = [
+                    {
+                        "name": p.get("name"),
+                        "symbol": p.get("symbol"),
+                        "duration_minutes": p.get("duration", 0) // 60 if p.get("duration") else None,
+                        "insulin_needs_scale": p.get("insulinNeedsScaleFactor"),
+                        "target_range": [
+                            convert_glucose(p["targetRange"][0]),
+                            convert_glucose(p["targetRange"][1])
+                        ] if p.get("targetRange") else None
+                    }
+                    for p in presets
+                ]
+        
+        return result
+        
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch profile: {e}"}
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Nightscout CGM data fetcher and analyzer"
@@ -5348,6 +5835,25 @@ def main():
         help="Open the report in default browser after generating"
     )
 
+    # Pump status command
+    subparsers.add_parser(
+        "pump", help="Get current pump status (IOB, COB, predicted glucose)"
+    )
+
+    # Treatments command
+    treatments_parser = subparsers.add_parser(
+        "treatments", help="Get recent treatments (boluses, temp basals, carbs)"
+    )
+    treatments_parser.add_argument(
+        "--hours", type=int, default=24,
+        help="Number of hours to look back (default: 24)"
+    )
+
+    # Profile command
+    subparsers.add_parser(
+        "profile", help="Get pump profile settings (basal rates, ISF, carb ratios)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "current":
@@ -5433,6 +5939,12 @@ def main():
             if args.open:
                 import webbrowser
                 webbrowser.open(f"file://{result['report']}")
+    elif args.command == "pump":
+        result = get_pump_status()
+    elif args.command == "treatments":
+        result = get_treatments(hours=args.hours)
+    elif args.command == "profile":
+        result = get_profile()
     else:
         parser.print_help()
         sys.exit(1)

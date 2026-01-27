@@ -42,7 +42,11 @@ Where `<skill-path>` is the location where this skill is installed (e.g., `~/.co
 | `day <date> [options]` | View all readings for a specific date |
 | `worst [options]` | Find your worst days for glucose control |
 | `chart [options]` | Terminal visualizations (heatmap, sparkline, day chart) |
-| `report [--days N]` | Generate interactive HTML report with charts |
+| `pump` | Get current pump status (IOB, COB, predicted glucose) * |
+| `treatments [--hours N]` | Get recent treatments (boluses, temp basals, carbs) * |
+| `profile` | Get pump profile settings (basal rates, ISF, carb ratios) * |
+
+\* **Pump commands require Loop, OpenAPS, or similar closed-loop system.** The skill auto-detects pump capabilities on first use. CGM-only users won't see errors—commands simply report that pump data isn't available.
 
 ### Report Command
 
@@ -97,6 +101,32 @@ The `chart` command creates terminal visualizations:
 - `--heatmap` - Weekly grid showing time-in-range by day and hour
 - `--day NAME` - Hourly breakdown for a specific day of week
 - `--color` - Use ANSI colors (for direct terminal, not inside Copilot)
+
+### Pump Commands (Optional)
+
+These commands require a closed-loop system (Loop, OpenAPS, AndroidAPS, etc.) uploading to Nightscout. The skill auto-detects pump capabilities—CGM-only users won't be bothered with errors.
+
+**`pump`** - Get current pump/loop status:
+- IOB (Insulin on Board) and COB (Carbs on Board)
+- Predicted glucose trajectory
+- Recommended bolus
+- Last enacted action (temp basal or bolus)
+- Pump status (manufacturer, model, suspended/bolusing)
+- Phone battery level
+
+**`treatments [--hours N]`** - Get recent treatments:
+- Boluses (automatic and manual)
+- Temp basals
+- Carb entries
+- Summary totals (total insulin, total carbs)
+
+**`profile`** - Get pump profile settings:
+- Basal rates by time of day
+- Total daily basal
+- ISF (Insulin Sensitivity Factor) by time
+- Carb ratios by time
+- Target glucose ranges
+- Loop settings (max bolus, pre-meal targets, override presets)
 
 ### Examples
 
@@ -178,6 +208,19 @@ With the pattern analysis capabilities, you can ask natural questions like:
 - "What was my worst lunch this week?" (you'll be asked what hours you eat lunch)
 - "Show me what happened yesterday during dinner"
 - "What were my worst days for breakfast the last two weeks?"
+
+### Pump-Related Questions (if using Loop/OpenAPS)
+
+- "What's my current IOB?"
+- "How much insulin on board do I have?"
+- "Show me my pump status"
+- "What's my predicted glucose?"
+- "What treatments have I had in the last 6 hours?"
+- "How much insulin did I take today?"
+- "What are my basal rates?"
+- "What's my carb ratio?"
+- "What are my ISF settings?"
+- "Show me my Loop profile"
 
 ## Output Interpretation
 
