@@ -29,6 +29,8 @@ build/
 .DS_Store
 Thumbs.db
 .coverage
+coverage.json
+htmlcov/
 
 config.json
 
