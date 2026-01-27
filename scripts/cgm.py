@@ -2622,7 +2622,7 @@ def generate_html_report(days=90, output_path=None):
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 30px;
-            border-left: 4px solid #a855f7;
+            border-left: 4px solid #f97316;
         }
         
         .pump-section h2::before {
@@ -2647,7 +2647,7 @@ def generate_html_report(days=90, output_path=None):
         .pump-stat .value {
             font-size: 1.8rem;
             font-weight: bold;
-            color: #a855f7;
+            color: #f97316;
         }
         
         .pump-stat .label {
@@ -2671,7 +2671,7 @@ def generate_html_report(days=90, output_path=None):
         
         /* Bolus markers on charts */
         .bolus-marker {
-            background: #a855f7;
+            background: #f97316;
         }
         
         .carb-marker {
@@ -3441,7 +3441,7 @@ def generate_html_report(days=90, output_path=None):
             veryHigh: '#ef4444',
             accent: '#e94560',
             info: '#3b82f6',
-            insulin: '#a855f7',
+            insulin: '#f97316',
             carbs: '#22c55e',
             basal: '#6366f1'
         };
@@ -4019,7 +4019,7 @@ def generate_html_report(days=90, output_path=None):
                 label: 'Avg Insulin (U)',
                 data: hourlyInsulinAvg.map(d => d.avg),
                 borderColor: colors.insulin,
-                backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                backgroundColor: 'rgba(249, 115, 22, 0.15)',
                 borderWidth: 2,
                 fill: true,
                 pointRadius: 3,
