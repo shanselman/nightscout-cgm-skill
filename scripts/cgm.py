@@ -2186,6 +2186,82 @@ def generate_html_report(days=90, output_path=None):
     alerts = alerts_result.get("alerts", []) if "error" not in alerts_result else []
     
     # =========================================================================
+    # Pump/Treatment Data (if available)
+    # =========================================================================
+    pump_data_available = has_pump_data()
+    treatments_data = {"boluses": [], "temp_basals": [], "carbs": [], "summary": {}}
+    pump_status = {}
+    profile_data = {}
+    
+    if pump_data_available:
+        # Fetch treatments for the report period
+        treatments_result = get_treatments(hours=days * 24)
+        if "error" not in treatments_result:
+            treatments_data = treatments_result
+        
+        # Get current pump status (for IOB/COB if recent)
+        pump_result = get_pump_status()
+        if "error" not in pump_result:
+            pump_status = pump_result
+        
+        # Get profile for basal rate reference
+        profile_result = get_profile()
+        if "error" not in profile_result:
+            profile_data = profile_result
+    
+    # Process treatments for chart overlays
+    bolus_markers = []  # For overlaying on glucose charts
+    carb_markers = []
+    hourly_insulin = defaultdict(float)  # For modal day insulin overlay
+    daily_insulin = defaultdict(float)   # For daily totals
+    
+    if pump_data_available and treatments_data.get("boluses"):
+        for b in treatments_data["boluses"]:
+            try:
+                ts = b.get("timestamp", "")
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                bolus_markers.append({
+                    "date": ts,
+                    "hour": dt.hour + dt.minute / 60,
+                    "amount": b.get("insulin", 0),
+                    "automatic": b.get("automatic", False)
+                })
+                hourly_insulin[dt.hour] += b.get("insulin", 0)
+                daily_insulin[dt.strftime("%Y-%m-%d")] += b.get("insulin", 0)
+            except (ValueError, TypeError):
+                pass
+    
+    if pump_data_available and treatments_data.get("carbs"):
+        for c in treatments_data["carbs"]:
+            try:
+                ts = c.get("timestamp", "")
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                carb_markers.append({
+                    "date": ts,
+                    "hour": dt.hour + dt.minute / 60,
+                    "amount": c.get("carbs", 0)
+                })
+            except (ValueError, TypeError):
+                pass
+    
+    # Calculate daily insulin stats for the pump section
+    daily_insulin_stats = []
+    for date_str in sorted(daily_insulin.keys()):
+        daily_insulin_stats.append({
+            "date": date_str,
+            "total": round(daily_insulin[date_str], 2)
+        })
+    
+    # Hourly insulin averages (for modal day overlay)
+    hourly_insulin_avg = []
+    days_count = max(1, len(set(d["date"][:10] for d in bolus_markers))) if bolus_markers else 1
+    for hour in range(24):
+        hourly_insulin_avg.append({
+            "hour": hour,
+            "avg": round(hourly_insulin[hour] / days_count, 2) if hourly_insulin[hour] else 0
+        })
+    
+    # =========================================================================
     # HTML Template with embedded Chart.js
     # =========================================================================
     
@@ -2538,6 +2614,68 @@ def generate_html_report(days=90, output_path=None):
             font-size: 3rem;
             margin-bottom: 10px;
             color: var(--success);
+        }
+        
+        /* Pump Section Styles */
+        .pump-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-left: 4px solid #a855f7;
+        }
+        
+        .pump-section h2::before {
+            content: '💉';
+            font-size: 1.3rem;
+        }
+        
+        .pump-stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .pump-stat {
+            background: var(--bg-card);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+        }
+        
+        .pump-stat .value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #a855f7;
+        }
+        
+        .pump-stat .label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        .pump-stat.carbs .value {
+            color: #22c55e;
+        }
+        
+        .pump-stat.basal .value {
+            color: #6366f1;
+        }
+        
+        .insulin-chart-container {
+            height: 250px;
+            margin-top: 15px;
+        }
+        
+        /* Bolus markers on charts */
+        .bolus-marker {
+            background: #a855f7;
+        }
+        
+        .carb-marker {
+            background: #22c55e;
         }
         
         .chart-section {
@@ -3177,6 +3315,9 @@ def generate_html_report(days=90, output_path=None):
             </div>
         </div>
         
+        <!-- Pump/Insulin Section (only shown if pump data available) -->
+        %(pump_section_html)s
+        
         <!-- Time in Range Pie Chart -->
         <div class="chart-section">
             <h2>Time in Range Distribution</h2>
@@ -3282,7 +3423,14 @@ def generate_html_report(days=90, output_path=None):
         let customEndDate = null;
         
         // Chart instances (for updates)
-        let tirChart, modalChart, dailyChart, dowChart, histChart, weeklyChart;
+        let tirChart, modalChart, dailyChart, dowChart, histChart, weeklyChart, insulinChart;
+        
+        // Pump data
+        const hasPumpData = %(has_pump_data_js)s;
+        const bolusMarkers = %(bolus_markers_json)s;
+        const carbMarkers = %(carb_markers_json)s;
+        const hourlyInsulinAvg = %(hourly_insulin_json)s;
+        const dailyInsulinStats = %(daily_insulin_json)s;
         
         // Colors
         const colors = {
@@ -3292,7 +3440,10 @@ def generate_html_report(days=90, output_path=None):
             high: '#eab308',
             veryHigh: '#ef4444',
             accent: '#e94560',
-            info: '#3b82f6'
+            info: '#3b82f6',
+            insulin: '#a855f7',
+            carbs: '#22c55e',
+            basal: '#6366f1'
         };
         
         // Initialize date inputs with data range
@@ -3793,71 +3944,118 @@ def generate_html_report(days=90, output_path=None):
         const modalP25 = modalDayData.map(d => d.p25);
         const modalP75 = modalDayData.map(d => d.p75);
         
+        // Build modal day datasets
+        const modalDayDatasets = [
+            {
+                label: '90th Percentile',
+                data: modalP90,
+                borderColor: 'transparent',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                fill: '+1',
+                pointRadius: 0,
+                order: 4,
+                yAxisID: 'y'
+            },
+            {
+                label: '10th Percentile',
+                data: modalP10,
+                borderColor: 'transparent',
+                backgroundColor: 'transparent',
+                fill: false,
+                pointRadius: 0,
+                order: 5,
+                yAxisID: 'y'
+            },
+            {
+                label: '75th Percentile',
+                data: modalP75,
+                borderColor: 'transparent',
+                backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                fill: '+1',
+                pointRadius: 0,
+                order: 2,
+                yAxisID: 'y'
+            },
+            {
+                label: '25th Percentile',
+                data: modalP25,
+                borderColor: 'transparent',
+                backgroundColor: 'transparent',
+                fill: false,
+                pointRadius: 0,
+                order: 3,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Median',
+                data: modalMedian,
+                borderColor: colors.info,
+                backgroundColor: colors.info,
+                borderWidth: 3,
+                fill: false,
+                pointRadius: 2,
+                tension: 0.3,
+                order: 1,
+                yAxisID: 'y'
+            },
+            {
+                label: 'Mean',
+                data: modalMean,
+                borderColor: colors.accent,
+                backgroundColor: colors.accent,
+                borderWidth: 2,
+                borderDash: [5, 5],
+                fill: false,
+                pointRadius: 0,
+                tension: 0.3,
+                order: 0,
+                yAxisID: 'y'
+            }
+        ];
+        
+        // Add insulin overlay if pump data available
+        if (hasPumpData && hourlyInsulinAvg.length > 0) {
+            modalDayDatasets.push({
+                label: 'Avg Insulin (U)',
+                data: hourlyInsulinAvg.map(d => d.avg),
+                borderColor: colors.insulin,
+                backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                borderWidth: 2,
+                fill: true,
+                pointRadius: 3,
+                pointStyle: 'circle',
+                tension: 0.3,
+                order: -1,
+                yAxisID: 'yInsulin'
+            });
+        }
+        
+        // Modal day chart scales
+        const modalDayScales = {
+            y: {
+                title: { display: true, text: unit },
+                min: %(chart_min)s,
+                max: %(chart_max)s,
+                position: 'left'
+            }
+        };
+        
+        if (hasPumpData && hourlyInsulinAvg.length > 0) {
+            modalDayScales.yInsulin = {
+                type: 'linear',
+                position: 'right',
+                title: { display: true, text: 'Insulin (U)' },
+                min: 0,
+                grid: { drawOnChartArea: false },
+                ticks: { color: colors.insulin }
+            };
+        }
+        
         modalChart = new Chart(document.getElementById('modalDayChart'), {
             type: 'line',
             data: {
                 labels: modalHours,
-                datasets: [
-                    {
-                        label: '90th Percentile',
-                        data: modalP90,
-                        borderColor: 'transparent',
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        fill: '+1',
-                        pointRadius: 0,
-                        order: 4
-                    },
-                    {
-                        label: '10th Percentile',
-                        data: modalP10,
-                        borderColor: 'transparent',
-                        backgroundColor: 'transparent',
-                        fill: false,
-                        pointRadius: 0,
-                        order: 5
-                    },
-                    {
-                        label: '75th Percentile',
-                        data: modalP75,
-                        borderColor: 'transparent',
-                        backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                        fill: '+1',
-                        pointRadius: 0,
-                        order: 2
-                    },
-                    {
-                        label: '25th Percentile',
-                        data: modalP25,
-                        borderColor: 'transparent',
-                        backgroundColor: 'transparent',
-                        fill: false,
-                        pointRadius: 0,
-                        order: 3
-                    },
-                    {
-                        label: 'Median',
-                        data: modalMedian,
-                        borderColor: colors.info,
-                        backgroundColor: colors.info,
-                        borderWidth: 3,
-                        fill: false,
-                        pointRadius: 2,
-                        tension: 0.3,
-                        order: 1
-                    },
-                    {
-                        label: 'Mean',
-                        data: modalMean,
-                        borderColor: colors.accent,
-                        backgroundColor: colors.accent,
-                        borderWidth: 2,
-                        borderDash: [5, 5],
-                        fill: false,
-                        pointRadius: 0,
-                        tension: 0.3,
-                        order: 0
-                    }
-                ]
+                datasets: modalDayDatasets
             },
             options: {
                 responsive: true,
@@ -3867,7 +4065,7 @@ def generate_html_report(days=90, output_path=None):
                     legend: { 
                         position: 'top',
                         labels: { 
-                            filter: (item) => ['Median', 'Mean'].includes(item.text)
+                            filter: (item) => ['Median', 'Mean', 'Avg Insulin (U)'].includes(item.text)
                         }
                     },
                     annotation: {
@@ -3891,13 +4089,7 @@ def generate_html_report(days=90, output_path=None):
                         }
                     }
                 },
-                scales: {
-                    y: {
-                        title: { display: true, text: unit },
-                        min: %(chart_min)s,
-                        max: %(chart_max)s
-                    }
-                }
+                scales: modalDayScales
             }
         });
         
@@ -4089,6 +4281,47 @@ def generate_html_report(days=90, output_path=None):
                 }
             }
         });
+        
+        // Insulin Chart (only if pump data available)
+        if (hasPumpData && dailyInsulinStats.length > 0) {
+            const insulinCanvas = document.getElementById('insulinChart');
+            if (insulinCanvas) {
+                insulinChart = new Chart(insulinCanvas, {
+                    type: 'bar',
+                    data: {
+                        labels: dailyInsulinStats.map(d => d.date.slice(5)),
+                        datasets: [{
+                            label: 'Daily Insulin (U)',
+                            data: dailyInsulinStats.map(d => d.total),
+                            backgroundColor: colors.insulin,
+                            borderColor: colors.insulin,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => `${ctx.parsed.y.toFixed(1)} U`
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                title: { display: true, text: 'Insulin (U)' },
+                                beginAtZero: true
+                            },
+                            x: {
+                                ticks: { maxRotation: 45, minRotation: 45 }
+                            }
+                        }
+                    }
+                });
+            }
+        }
         
         // Initialize date controls
         initDateControls();
@@ -4571,6 +4804,49 @@ def generate_html_report(days=90, output_path=None):
         chart_max = 350
     
     # Format the HTML
+    # Build pump section HTML (only if pump data available)
+    if pump_data_available and treatments_data.get("summary"):
+        summary = treatments_data["summary"]
+        tdd = summary.get("total_insulin", 0)
+        total_carbs = summary.get("total_carbs", 0)
+        total_boluses = summary.get("total_boluses", 0)
+        
+        # Calculate average daily insulin
+        days_with_data = len(daily_insulin_stats) if daily_insulin_stats else 1
+        avg_daily_insulin = round(tdd / days_with_data, 1) if days_with_data else 0
+        
+        pump_section_html = '''
+        <div class="pump-section chart-section">
+            <h2>Insulin Delivery</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 15px; font-size: 0.9rem;">
+                Insulin and carb data from your pump/Loop system for this period.
+            </p>
+            <div class="pump-stats-grid">
+                <div class="pump-stat">
+                    <div class="value">%.1f</div>
+                    <div class="label">Avg Daily Insulin (U)</div>
+                </div>
+                <div class="pump-stat">
+                    <div class="value">%d</div>
+                    <div class="label">Total Boluses</div>
+                </div>
+                <div class="pump-stat carbs">
+                    <div class="value">%d</div>
+                    <div class="label">Total Carbs (g)</div>
+                </div>
+                <div class="pump-stat">
+                    <div class="value">%.1f</div>
+                    <div class="label">Period Total (U)</div>
+                </div>
+            </div>
+            <div class="insulin-chart-container">
+                <canvas id="insulinChart"></canvas>
+            </div>
+        </div>
+        ''' % (avg_daily_insulin, total_boluses, total_carbs, tdd)
+    else:
+        pump_section_html = ""
+    
     html_content = html_template % {
         "first_date": first_date,
         "last_date": last_date,
@@ -4605,7 +4881,13 @@ def generate_html_report(days=90, output_path=None):
         "all_readings_json": json.dumps(all_readings_data),
         "is_mmol_js": "true" if is_mmol else "false",
         "initial_days": days,
-        "alerts_json": json.dumps(alerts)
+        "alerts_json": json.dumps(alerts),
+        "pump_section_html": pump_section_html,
+        "has_pump_data_js": "true" if pump_data_available else "false",
+        "bolus_markers_json": json.dumps(bolus_markers),
+        "carb_markers_json": json.dumps(carb_markers),
+        "hourly_insulin_json": json.dumps(hourly_insulin_avg),
+        "daily_insulin_json": json.dumps(daily_insulin_stats)
     }
     
     # Determine output path
