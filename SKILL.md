@@ -13,7 +13,7 @@ This skill provides tools for fetching and analyzing Continuous Glucose Monitor 
 
 ```bash
 cd <skill-path>
-python -m pytest tests/ -q           # Quick check (150 tests)
+python -m pytest tests/ -q           # Quick check (255+ tests)
 python -m pytest tests/ --cov=scripts  # With coverage
 ```
 
@@ -66,6 +66,7 @@ Generate a comprehensive, self-contained HTML report with interactive charts:
 - Glucose histogram, Heatmap with hover tooltips
 - Weekly summary
 - Key stats: TIR%, GMI (estimated A1C), CV (variability)
+- **Insulin Delivery** (if using Loop/OpenAPS): TDD breakdown (bolus/basal), stacked bar chart, carb tracking
 
 ### Day Command
 

@@ -12,6 +12,7 @@ An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Conti
 ## Features
 
 - **Interactive HTML Reports** - Generate comprehensive local reports with charts (like [tally](https://github.com/davidfowl/tally) for diabetes)
+- **Pump/Insulin Integration** - Reports automatically include insulin delivery data if you use Loop/OpenAPS (stacked bolus/basal charts, TDD breakdown)
 - **AGP Reports** - Generate clinical-standard Ambulatory Glucose Profile (AGP) reports for sharing with healthcare providers
 - **Current Glucose** - Real-time blood glucose with trend direction
 - **Trend Alerts** - Proactive pattern detection for recurring lows/highs (e.g., "Morning lows 8-10am")
@@ -68,6 +69,11 @@ python scripts/cgm.py report --days 90 --open
   - Glucose distribution histogram
   - Time-in-Range heatmap (day × hour) with hover tooltips
   - Weekly summary
+- **Insulin Delivery Section** (for Loop/OpenAPS users):
+  - Avg Daily Total (bolus + basal TDD)
+  - Bolus/Basal breakdown with ratio
+  - Stacked bar chart showing daily insulin (bolus vs basal)
+  - Total carbs tracked
 
 ### Color Scheme
 
@@ -555,7 +561,7 @@ This skill reads your `DISPLAY_UNITS` setting and converts automatically - you d
 
 ### Running Tests
 
-The skill has 150 tests covering all functionality:
+The skill has 255+ tests covering all functionality:
 
 ```bash
 cd ~/.copilot/skills/nightscout-cgm
@@ -586,4 +592,6 @@ python -m pytest tests/test_real_data.py -v
 | test_cli.py | Command-line argument parsing |
 | test_edge_cases.py | Error handling, boundaries |
 | test_real_data.py | Tests using real Nightscout API responses |
+| test_pump.py | Pump commands, treatments, profile |
+| test_coverage_gaps.py | Error handling edge cases |
 
