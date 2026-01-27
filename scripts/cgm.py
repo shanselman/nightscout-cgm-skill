@@ -2192,6 +2192,7 @@ def generate_html_report(days=90, output_path=None):
     treatments_data = {"boluses": [], "temp_basals": [], "carbs": [], "summary": {}}
     pump_status = {}
     profile_data = {}
+    scheduled_basal_per_day = 0
     
     if pump_data_available:
         # Fetch treatments for the report period
@@ -2208,12 +2209,13 @@ def generate_html_report(days=90, output_path=None):
         profile_result = get_profile()
         if "error" not in profile_result:
             profile_data = profile_result
+            scheduled_basal_per_day = profile_data.get("total_daily_basal", 0)
     
     # Process treatments for chart overlays
     bolus_markers = []  # For overlaying on glucose charts
     carb_markers = []
     hourly_insulin = defaultdict(float)  # For modal day insulin overlay
-    daily_insulin = defaultdict(float)   # For daily totals
+    daily_bolus = defaultdict(float)     # For daily bolus totals
     
     if pump_data_available and treatments_data.get("boluses"):
         for b in treatments_data["boluses"]:
@@ -2227,7 +2229,7 @@ def generate_html_report(days=90, output_path=None):
                     "automatic": b.get("automatic", False)
                 })
                 hourly_insulin[dt.hour] += b.get("insulin", 0)
-                daily_insulin[dt.strftime("%Y-%m-%d")] += b.get("insulin", 0)
+                daily_bolus[dt.strftime("%Y-%m-%d")] += b.get("insulin", 0)
             except (ValueError, TypeError):
                 pass
     
@@ -2244,12 +2246,15 @@ def generate_html_report(days=90, output_path=None):
             except (ValueError, TypeError):
                 pass
     
-    # Calculate daily insulin stats for the pump section
+    # Calculate daily insulin stats for the pump section (bolus + basal)
     daily_insulin_stats = []
-    for date_str in sorted(daily_insulin.keys()):
+    for date_str in sorted(daily_bolus.keys()):
+        bolus = daily_bolus[date_str]
         daily_insulin_stats.append({
             "date": date_str,
-            "total": round(daily_insulin[date_str], 2)
+            "bolus": round(bolus, 2),
+            "basal": round(scheduled_basal_per_day, 2),
+            "total": round(bolus + scheduled_basal_per_day, 2)
         })
     
     # Hourly insulin averages (for modal day overlay)
@@ -2622,7 +2627,7 @@ def generate_html_report(days=90, output_path=None):
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 30px;
-            border-left: 4px solid #f97316;
+            border-left: 4px solid #ad5a93;
         }
         
         .pump-section h2::before {
@@ -2647,7 +2652,7 @@ def generate_html_report(days=90, output_path=None):
         .pump-stat .value {
             font-size: 1.8rem;
             font-weight: bold;
-            color: #f97316;
+            color: #ad5a93;
         }
         
         .pump-stat .label {
@@ -2671,7 +2676,7 @@ def generate_html_report(days=90, output_path=None):
         
         /* Bolus markers on charts */
         .bolus-marker {
-            background: #f97316;
+            background: #ad5a93;
         }
         
         .carb-marker {
@@ -3441,7 +3446,7 @@ def generate_html_report(days=90, output_path=None):
             veryHigh: '#ef4444',
             accent: '#e94560',
             info: '#3b82f6',
-            insulin: '#f97316',
+            insulin: '#ad5a93',
             carbs: '#22c55e',
             basal: '#6366f1'
         };
@@ -4019,7 +4024,7 @@ def generate_html_report(days=90, output_path=None):
                 label: 'Avg Insulin (U)',
                 data: hourlyInsulinAvg.map(d => d.avg),
                 borderColor: colors.insulin,
-                backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                backgroundColor: 'rgba(173, 90, 147, 0.15)',
                 borderWidth: 2,
                 fill: true,
                 pointRadius: 3,
@@ -4282,7 +4287,7 @@ def generate_html_report(days=90, output_path=None):
             }
         });
         
-        // Insulin Chart (only if pump data available)
+        // Insulin Chart - Stacked Bar (Bolus vs Basal)
         if (hasPumpData && dailyInsulinStats.length > 0) {
             const insulinCanvas = document.getElementById('insulinChart');
             if (insulinCanvas) {
@@ -4290,31 +4295,49 @@ def generate_html_report(days=90, output_path=None):
                     type: 'bar',
                     data: {
                         labels: dailyInsulinStats.map(d => d.date.slice(5)),
-                        datasets: [{
-                            label: 'Daily Insulin (U)',
-                            data: dailyInsulinStats.map(d => d.total),
-                            backgroundColor: colors.insulin,
-                            borderColor: colors.insulin,
-                            borderWidth: 1
-                        }]
+                        datasets: [
+                            {
+                                label: 'Bolus',
+                                data: dailyInsulinStats.map(d => d.bolus),
+                                backgroundColor: colors.insulin,
+                                borderColor: colors.insulin,
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Basal',
+                                data: dailyInsulinStats.map(d => d.basal),
+                                backgroundColor: colors.basal,
+                                borderColor: colors.basal,
+                                borderWidth: 1
+                            }
+                        ]
                     },
                     options: {
                         responsive: true,
                         maintainAspectRatio: false,
                         plugins: {
-                            legend: { display: false },
+                            legend: { 
+                                display: true,
+                                position: 'top'
+                            },
                             tooltip: {
                                 callbacks: {
-                                    label: (ctx) => `${ctx.parsed.y.toFixed(1)} U`
+                                    afterBody: (ctx) => {
+                                        const idx = ctx[0].dataIndex;
+                                        const total = dailyInsulinStats[idx].total;
+                                        return `Total: ${total.toFixed(1)} U`;
+                                    }
                                 }
                             }
                         },
                         scales: {
                             y: {
+                                stacked: true,
                                 title: { display: true, text: 'Insulin (U)' },
                                 beginAtZero: true
                             },
                             x: {
+                                stacked: true,
                                 ticks: { maxRotation: 45, minRotation: 45 }
                             }
                         }
@@ -4807,13 +4830,16 @@ def generate_html_report(days=90, output_path=None):
     # Build pump section HTML (only if pump data available)
     if pump_data_available and treatments_data.get("summary"):
         summary = treatments_data["summary"]
-        tdd = summary.get("total_insulin", 0)
+        tdd_bolus = summary.get("total_insulin", 0)
         total_carbs = summary.get("total_carbs", 0)
         total_boluses = summary.get("total_boluses", 0)
         
-        # Calculate average daily insulin
+        # Calculate average daily insulin (bolus + basal)
         days_with_data = len(daily_insulin_stats) if daily_insulin_stats else 1
-        avg_daily_insulin = round(tdd / days_with_data, 1) if days_with_data else 0
+        avg_daily_bolus = round(tdd_bolus / days_with_data, 1) if days_with_data else 0
+        avg_daily_basal = round(scheduled_basal_per_day, 1)
+        avg_daily_total = round(avg_daily_bolus + avg_daily_basal, 1)
+        tdd_total = round(tdd_bolus + (scheduled_basal_per_day * days_with_data), 1)
         
         pump_section_html = '''
         <div class="pump-section chart-section">
@@ -4824,26 +4850,27 @@ def generate_html_report(days=90, output_path=None):
             <div class="pump-stats-grid">
                 <div class="pump-stat">
                     <div class="value">%.1f</div>
-                    <div class="label">Avg Daily Insulin (U)</div>
+                    <div class="label">Avg Daily Total (U)</div>
                 </div>
                 <div class="pump-stat">
-                    <div class="value">%d</div>
-                    <div class="label">Total Boluses</div>
+                    <div class="value">%.1f / %.1f</div>
+                    <div class="label">Bolus / Basal (U/day)</div>
                 </div>
                 <div class="pump-stat carbs">
                     <div class="value">%d</div>
                     <div class="label">Total Carbs (g)</div>
                 </div>
                 <div class="pump-stat">
-                    <div class="value">%.1f</div>
-                    <div class="label">Period Total (U)</div>
+                    <div class="value">%d%%%%</div>
+                    <div class="label">Bolus Ratio</div>
                 </div>
             </div>
             <div class="insulin-chart-container">
                 <canvas id="insulinChart"></canvas>
             </div>
         </div>
-        ''' % (avg_daily_insulin, total_boluses, total_carbs, tdd)
+        ''' % (avg_daily_total, avg_daily_bolus, avg_daily_basal, total_carbs, 
+               round(avg_daily_bolus / avg_daily_total * 100) if avg_daily_total else 0)
     else:
         pump_section_html = ""
     
