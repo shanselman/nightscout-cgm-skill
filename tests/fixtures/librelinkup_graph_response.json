@@ -1,0 +1,165 @@
+{
+  "status": 0,
+  "data": {
+    "connection": {
+      "id": "conn-123",
+      "patientId": "patient-456",
+      "country": "US",
+      "status": 2,
+      "glucoseMeasurement": {
+        "FactoryTimestamp": "1/15/2026 2:30:00 PM",
+        "Timestamp": "1/15/2026 2:30:00 PM",
+        "type": 1,
+        "ValueInMgPerDl": 125,
+        "Value": 125,
+        "TrendArrow": 3,
+        "TrendMessage": null,
+        "MeasurementColor": 1,
+        "GlucoseUnits": 1,
+        "isHigh": false,
+        "isLow": false
+      },
+      "glucoseItem": {
+        "FactoryTimestamp": "1/15/2026 2:30:00 PM",
+        "Timestamp": "1/15/2026 2:30:00 PM",
+        "type": 1,
+        "ValueInMgPerDl": 125,
+        "Value": 125,
+        "TrendArrow": 3,
+        "TrendMessage": null,
+        "MeasurementColor": 1,
+        "GlucoseUnits": 1,
+        "isHigh": false,
+        "isLow": false
+      },
+      "sensor": {
+        "deviceId": "sensor-789",
+        "sn": "MH1234567"
+      },
+      "patientDevice": {
+        "did": "device-012",
+        "dtid": 40068,
+        "v": "2.5.2",
+        "ll": 70,
+        "hl": 240,
+        "fixedLowAlarmValue": 70,
+        "fixedHighAlarmValue": 240
+      }
+    },
+    "activeSensors": [
+      {
+        "sensor": {
+          "deviceId": "sensor-789",
+          "sn": "MH1234567"
+        },
+        "device": {
+          "did": "device-012",
+          "dtid": 40068,
+          "v": "2.5.2"
+        }
+      }
+    ],
+    "graphData": [
+      {
+        "FactoryTimestamp": "1/15/2026 2:30:00 PM",
+        "Timestamp": "1/15/2026 2:30:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 125,
+        "Value": 125,
+        "TrendArrow": 3,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 2:15:00 PM",
+        "Timestamp": "1/15/2026 2:15:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 130,
+        "Value": 130,
+        "TrendArrow": 4,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 2:00:00 PM",
+        "Timestamp": "1/15/2026 2:00:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 135,
+        "Value": 135,
+        "TrendArrow": 4,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 1:45:00 PM",
+        "Timestamp": "1/15/2026 1:45:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 140,
+        "Value": 140,
+        "TrendArrow": 4,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 1:30:00 PM",
+        "Timestamp": "1/15/2026 1:30:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 138,
+        "Value": 138,
+        "TrendArrow": 3,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 1:15:00 PM",
+        "Timestamp": "1/15/2026 1:15:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 132,
+        "Value": 132,
+        "TrendArrow": 2,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 1:00:00 PM",
+        "Timestamp": "1/15/2026 1:00:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 120,
+        "Value": 120,
+        "TrendArrow": 2,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 12:45:00 PM",
+        "Timestamp": "1/15/2026 12:45:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 110,
+        "Value": 110,
+        "TrendArrow": 3,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 12:30:00 PM",
+        "Timestamp": "1/15/2026 12:30:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 108,
+        "Value": 108,
+        "TrendArrow": 3,
+        "isHigh": false,
+        "isLow": false
+      },
+      {
+        "FactoryTimestamp": "1/15/2026 12:15:00 PM",
+        "Timestamp": "1/15/2026 12:15:00 PM",
+        "type": 0,
+        "ValueInMgPerDl": 105,
+        "Value": 105,
+        "TrendArrow": 3,
+        "isHigh": false,
+        "isLow": false
+      }
+    ]
+  }
+}

@@ -24,15 +24,34 @@ except ImportError:
     print("Error: requests library required. Install with: pip install requests")
     sys.exit(1)
 
-# Configuration - Set NIGHTSCOUT_URL environment variable to your Nightscout API endpoint
+# Configuration
+# Option A: Set NIGHTSCOUT_URL for Nightscout (traditional)
+# Option B: Set LIBRELINKUP_EMAIL + LIBRELINKUP_PASSWORD for direct Libre 3 access
 _raw_url = os.environ.get("NIGHTSCOUT_URL")
-if not _raw_url:
-    print("Error: NIGHTSCOUT_URL environment variable not set.")
-    print("Set it to your Nightscout site URL, e.g.:")
+_llu_email = os.environ.get("LIBRELINKUP_EMAIL")
+_llu_password = os.environ.get("LIBRELINKUP_PASSWORD")
+_llu_region = os.environ.get("LIBRELINKUP_REGION", "US").upper()
+
+# Determine data source mode
+DATA_SOURCE_NIGHTSCOUT = "nightscout"
+DATA_SOURCE_LIBRELINKUP = "librelinkup"
+
+if _raw_url:
+    DATA_SOURCE = DATA_SOURCE_NIGHTSCOUT
+elif _llu_email and _llu_password:
+    DATA_SOURCE = DATA_SOURCE_LIBRELINKUP
+else:
+    print("Error: No data source configured.")
+    print("")
+    print("Option A - Nightscout (recommended):")
     print("  export NIGHTSCOUT_URL='https://your-site.herokuapp.com'")
-    print("Or the full API endpoint:")
-    print("  export NIGHTSCOUT_URL='https://your-site.herokuapp.com/api/v1/entries.json'")
+    print("")
+    print("Option B - FreeStyle Libre 3 (direct via LibreLinkUp):")
+    print("  export LIBRELINKUP_EMAIL='your-email@example.com'")
+    print("  export LIBRELINKUP_PASSWORD='your-password'")
+    print("  export LIBRELINKUP_REGION='US'  # or EU, DE, FR, JP, AP, AU")
     sys.exit(1)
+
 
 # Normalize the URL - support both full endpoint and just the domain
 def _normalize_nightscout_url(url):
@@ -49,20 +68,409 @@ def _normalize_nightscout_url(url):
     # Just the domain
     return url + "/api/v1/entries.json"
 
-API_BASE = _normalize_nightscout_url(_raw_url)
 
-# Derive the API root from the entries URL
-API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
+# Set up Nightscout API URLs (only if using Nightscout)
+if DATA_SOURCE == DATA_SOURCE_NIGHTSCOUT:
+    API_BASE = _normalize_nightscout_url(_raw_url)
+    API_ROOT = API_BASE.replace("/entries.json", "").rstrip("/")
+else:
+    API_BASE = None
+    API_ROOT = None
+
+
+# ============================================================================
+# LibreLinkUp API Client
+# ============================================================================
+
+# Regional API endpoints for LibreLinkUp
+_LLU_REGION_URLS = {
+    "US": "https://api-us.libreview.io",
+    "EU": "https://api-eu.libreview.io",
+    "DE": "https://api-de.libreview.io",
+    "FR": "https://api-fr.libreview.io",
+    "JP": "https://api-jp.libreview.io",
+    "AP": "https://api-ap.libreview.io",
+    "AU": "https://api-au.libreview.io",
+}
+
+# Cached LibreLinkUp auth state
+_llu_auth = None
+
+
+def _llu_base_url():
+    """Get the LibreLinkUp API base URL for the configured region."""
+    return _LLU_REGION_URLS.get(_llu_region, _LLU_REGION_URLS["US"])
+
+
+def _llu_headers(token=None):
+    """Build required headers for LibreLinkUp API requests."""
+    headers = {
+        "product": "llu.android",
+        "version": "4.7.0",
+        "Content-Type": "application/json",
+        "Accept-Encoding": "gzip",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _llu_trend_to_direction(trend_arrow):
+    """
+    Map LibreLinkUp TrendArrow to Nightscout direction string.
+
+    LibreLinkUp uses integers 1-5, Nightscout uses descriptive strings.
+    """
+    mapping = {
+        1: "SingleDown",
+        2: "FortyFiveDown",
+        3: "Flat",
+        4: "FortyFiveUp",
+        5: "SingleUp",
+    }
+    return mapping.get(trend_arrow, "NOT COMPUTABLE")
+
+
+def _llu_trend_to_code(trend_arrow):
+    """
+    Map LibreLinkUp TrendArrow to Nightscout numeric trend code.
+
+    Nightscout codes: 1=DoubleUp, 2=SingleUp, 3=FortyFiveUp, 4=Flat,
+                      5=FortyFiveDown, 6=SingleDown, 7=DoubleDown
+    """
+    mapping = {
+        1: 6,  # SingleDown
+        2: 5,  # FortyFiveDown
+        3: 4,  # Flat
+        4: 3,  # FortyFiveUp
+        5: 2,  # SingleUp
+    }
+    return mapping.get(trend_arrow, 0)
+
+
+def _llu_parse_timestamp(ts_string):
+    """
+    Parse LibreLinkUp timestamp string to epoch milliseconds.
+
+    LibreLinkUp returns timestamps in formats like:
+      "1/15/2026 2:30:00 PM" or "2026-01-15T14:30:00"
+    """
+    formats = [
+        "%m/%d/%Y %I:%M:%S %p",   # US format: 1/15/2026 2:30:00 PM
+        "%d/%m/%Y %I:%M:%S %p",   # EU format: 15/1/2026 2:30:00 PM
+        "%Y-%m-%dT%H:%M:%S",      # ISO format
+        "%Y-%m-%d %H:%M:%S",      # Simple format
+    ]
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(ts_string, fmt).replace(tzinfo=timezone.utc)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            continue
+    return None
+
+
+def llu_login():
+    """
+    Authenticate with LibreLinkUp and return auth data.
+
+    Returns dict with 'token' and 'patient_id' on success,
+    or dict with 'error' on failure. Handles region redirects automatically.
+    """
+    global _llu_auth
+
+    # Check in-memory cache
+    if _llu_auth is not None:
+        return _llu_auth
+
+    # Check file cache (tokens are valid ~6 months)
+    config = _load_config()
+    cached = config.get("llu_auth")
+    if cached and cached.get("token") and cached.get("patient_id"):
+        cached_time = cached.get("_cached_at")
+        if cached_time:
+            try:
+                cached_dt = datetime.fromisoformat(cached_time.replace("Z", "+00:00"))
+                # Tokens valid for ~6 months, refresh after 30 days
+                if datetime.now(timezone.utc) - cached_dt < timedelta(days=30):
+                    _llu_auth = cached
+                    return _llu_auth
+            except ValueError:
+                pass
+
+    # Perform login
+    base_url = _llu_base_url()
+    payload = {"email": _llu_email, "password": _llu_password}
+
+    try:
+        resp = requests.post(
+            f"{base_url}/llu/auth/login",
+            json=payload,
+            headers=_llu_headers(),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        return {"error": f"LibreLinkUp login failed: {e}"}
+
+    # Handle region redirect (API returns redirect info instead of token)
+    if data.get("data") and data["data"].get("redirect"):
+        redirect_region = data["data"]["region"]
+        redirect_url = _LLU_REGION_URLS.get(
+            redirect_region.upper(),
+            f"https://api-{redirect_region.lower()}.libreview.io"
+        )
+        try:
+            resp = requests.post(
+                f"{redirect_url}/llu/auth/login",
+                json=payload,
+                headers=_llu_headers(),
+                timeout=15,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except requests.RequestException as e:
+            return {"error": f"LibreLinkUp login failed after redirect: {e}"}
+
+    # Extract token
+    auth_ticket = (data.get("data") or {}).get("authTicket") or {}
+    token = auth_ticket.get("token")
+    if not token:
+        return {"error": "LibreLinkUp login succeeded but no token returned. Check credentials."}
+
+    # Get patient connections to find patientId
+    try:
+        conn_resp = requests.get(
+            f"{_llu_base_url()}/llu/connections",
+            headers=_llu_headers(token),
+            timeout=15,
+        )
+        conn_resp.raise_for_status()
+        conn_data = conn_resp.json()
+    except requests.RequestException as e:
+        return {"error": f"Failed to get LibreLinkUp connections: {e}"}
+
+    connections = (conn_data.get("data") or [])
+    if not connections:
+        return {"error": "No connected patients found in LibreLinkUp. Set up sharing in the Libre app first."}
+
+    # Use first connection (most users have one)
+    patient_id = connections[0].get("patientId")
+    if not patient_id:
+        return {"error": "Could not find patient ID in LibreLinkUp connections."}
+
+    # Cache the auth data
+    _llu_auth = {
+        "token": token,
+        "patient_id": patient_id,
+        "_cached_at": datetime.now(timezone.utc).isoformat(),
+    }
+    config["llu_auth"] = _llu_auth
+    _save_config(config)
+
+    return _llu_auth
+
+
+def fetch_from_librelinkup():
+    """
+    Fetch glucose readings from LibreLinkUp and store in database.
+
+    Returns dict with status, new_readings count, and total_readings,
+    or dict with 'error' key on failure.
+    """
+    auth = llu_login()
+    if "error" in auth:
+        return auth
+
+    token = auth["token"]
+    patient_id = auth["patient_id"]
+
+    # Fetch graph data (~12 hours of readings)
+    try:
+        resp = requests.get(
+            f"{_llu_base_url()}/llu/connections/{patient_id}/graph",
+            headers=_llu_headers(token),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        # If auth expired, clear cache and retry once
+        if hasattr(e, "response") and getattr(e.response, "status_code", 0) == 401:
+            global _llu_auth
+            _llu_auth = None
+            config = _load_config()
+            config.pop("llu_auth", None)
+            _save_config(config)
+            auth = llu_login()
+            if "error" in auth:
+                return auth
+            try:
+                resp = requests.get(
+                    f"{_llu_base_url()}/llu/connections/{auth['patient_id']}/graph",
+                    headers=_llu_headers(auth["token"]),
+                    timeout=15,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except requests.RequestException as e2:
+                return {"error": f"Failed to fetch LibreLinkUp data after re-auth: {e2}"}
+        else:
+            return {"error": f"Failed to fetch LibreLinkUp data: {e}"}
+
+    conn = create_database()
+    total_new = 0
+
+    graph_data = (data.get("data") or {}).get("graphData") or []
+    connection = (data.get("data") or {}).get("connection") or {}
+    current_measurement = connection.get("glucoseMeasurement")
+
+    # Process graph data points
+    for point in graph_data:
+        value = point.get("Value") or point.get("ValueInMgPerDl")
+        if not value:
+            continue
+
+        ts_string = point.get("Timestamp") or point.get("FactoryTimestamp")
+        if not ts_string:
+            continue
+
+        date_ms = _llu_parse_timestamp(ts_string)
+        if not date_ms:
+            continue
+
+        reading_id = f"libre-{date_ms}"
+        trend_arrow = point.get("TrendArrow", 0)
+
+        cursor = conn.execute("SELECT 1 FROM readings WHERE id = ?", (reading_id,))
+        if not cursor.fetchone():
+            conn.execute(
+                "INSERT INTO readings VALUES (?,?,?,?,?,?,?)",
+                (
+                    reading_id,
+                    int(value),
+                    date_ms,
+                    datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc).isoformat(),
+                    _llu_trend_to_code(trend_arrow),
+                    _llu_trend_to_direction(trend_arrow),
+                    "libre3-librelinkup",
+                ),
+            )
+            total_new += 1
+
+    # Also include the current measurement if present
+    if current_measurement:
+        value = current_measurement.get("Value") or current_measurement.get("ValueInMgPerDl")
+        ts_string = current_measurement.get("Timestamp") or current_measurement.get("FactoryTimestamp")
+        if value and ts_string:
+            date_ms = _llu_parse_timestamp(ts_string)
+            if date_ms:
+                reading_id = f"libre-{date_ms}"
+                trend_arrow = current_measurement.get("TrendArrow", 0)
+                cursor = conn.execute("SELECT 1 FROM readings WHERE id = ?", (reading_id,))
+                if not cursor.fetchone():
+                    conn.execute(
+                        "INSERT INTO readings VALUES (?,?,?,?,?,?,?)",
+                        (
+                            reading_id,
+                            int(value),
+                            date_ms,
+                            datetime.fromtimestamp(date_ms / 1000, tz=timezone.utc).isoformat(),
+                            _llu_trend_to_code(trend_arrow),
+                            _llu_trend_to_direction(trend_arrow),
+                            "libre3-librelinkup",
+                        ),
+                    )
+                    total_new += 1
+
+    conn.commit()
+    total_readings = conn.execute("SELECT COUNT(*) FROM readings").fetchone()[0]
+    conn.close()
+
+    return {
+        "status": "success",
+        "source": "librelinkup",
+        "new_readings": total_new,
+        "total_readings": total_readings,
+        "database": str(DB_PATH),
+    }
+
+
+def get_current_glucose_librelinkup():
+    """Get the most recent glucose reading directly from LibreLinkUp."""
+    auth = llu_login()
+    if "error" in auth:
+        return auth
+
+    try:
+        resp = requests.get(
+            f"{_llu_base_url()}/llu/connections",
+            headers=_llu_headers(auth["token"]),
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch current glucose: {e}"}
+
+    connections = (data.get("data") or [])
+    if not connections:
+        return {"error": "No connected patients found in LibreLinkUp."}
+
+    measurement = connections[0].get("glucoseMeasurement")
+    if not measurement:
+        return {"error": "No current glucose measurement available."}
+
+    sgv = measurement.get("Value") or measurement.get("ValueInMgPerDl") or 0
+    t = get_thresholds()
+
+    if sgv < t["urgent_low"]:
+        status = "VERY LOW - urgent"
+    elif sgv < t["target_low"]:
+        status = "low"
+    elif sgv <= t["target_high"]:
+        status = "in range"
+    elif sgv <= t["urgent_high"]:
+        status = "high"
+    else:
+        status = "VERY HIGH"
+
+    trend_arrow = measurement.get("TrendArrow", 0)
+    ts_string = measurement.get("Timestamp") or measurement.get("FactoryTimestamp") or ""
+
+    return {
+        "glucose": convert_glucose(sgv),
+        "unit": get_unit_label(),
+        "trend": _llu_trend_to_direction(trend_arrow),
+        "timestamp": ts_string,
+        "status": status,
+        "source": "librelinkup",
+    }
 
 # Nightscout settings cache
 _cached_settings = None
 
 def get_nightscout_settings():
-    """Fetch settings from Nightscout server (cached)."""
+    """Fetch settings from Nightscout server (cached). Falls back to local config for LibreLinkUp."""
     global _cached_settings
     if _cached_settings is not None:
         return _cached_settings
-    
+
+    if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP:
+        # Use local configuration for LibreLinkUp users
+        config = _load_config()
+        _cached_settings = config.get("settings", {
+            "units": os.environ.get("CGM_UNITS", "mg/dl"),
+            "thresholds": {
+                "bgLow": int(os.environ.get("CGM_URGENT_LOW", 55)),
+                "bgTargetBottom": int(os.environ.get("CGM_TARGET_LOW", 70)),
+                "bgTargetTop": int(os.environ.get("CGM_TARGET_HIGH", 180)),
+                "bgHigh": int(os.environ.get("CGM_URGENT_HIGH", 250)),
+            }
+        })
+        return _cached_settings
+
     try:
         resp = requests.get(f"{API_ROOT}/status.json", timeout=10)
         resp.raise_for_status()
@@ -73,7 +481,7 @@ def get_nightscout_settings():
             _cached_settings = {}
     except (requests.RequestException, ValueError):
         _cached_settings = {}
-    
+
     return _cached_settings
 
 def use_mmol():
@@ -133,7 +541,7 @@ def detect_pump_capabilities():
     """
     Detect if this Nightscout instance has pump/treatment data.
     Results are cached to avoid repeated API calls.
-    
+
     Returns dict with:
         has_treatments: bool - treatments endpoint has data
         has_devicestatus: bool - devicestatus endpoint has data (Loop/OpenAPS)
@@ -142,7 +550,19 @@ def detect_pump_capabilities():
         loop_info: dict or None - Loop/OpenAPS name/version if available
     """
     global _pump_capabilities
-    
+
+    # LibreLinkUp doesn't have pump data
+    if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP:
+        _pump_capabilities = {
+            "has_treatments": False,
+            "has_devicestatus": False,
+            "has_profile": False,
+            "pump_info": None,
+            "loop_info": None,
+            "_checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        return _pump_capabilities
+
     # Check in-memory cache first
     if _pump_capabilities is not None:
         return _pump_capabilities
@@ -274,7 +694,8 @@ def ensure_data(days=90):
             return True
     
     # No data - auto-fetch
-    print("No local data found. Fetching from Nightscout (this may take a moment)...")
+    source_name = "LibreLinkUp" if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP else "Nightscout"
+    print(f"No local data found. Fetching from {source_name} (this may take a moment)...")
     result = fetch_and_store(days)
     if "error" in result:
         print(f"Error: {result['error']}")
@@ -310,7 +731,8 @@ def ensure_fresh_data(days=90, max_stale_minutes=30):
     age_minutes = (datetime.now(timezone.utc) - latest_time).total_seconds() / 60
     
     if age_minutes > max_stale_minutes:
-        print(f"Data is {int(age_minutes)} minutes old. Auto-syncing from Nightscout...")
+        source_name = "LibreLinkUp" if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP else "Nightscout"
+        print(f"Data is {int(age_minutes)} minutes old. Auto-syncing from {source_name}...")
         sync_result = fetch_and_store(days)
         if "error" in sync_result:
             print(f"Sync warning: {sync_result['error']} (using existing data)")
@@ -324,7 +746,10 @@ def ensure_fresh_data(days=90, max_stale_minutes=30):
 
 
 def fetch_and_store(days=90):
-    """Fetch CGM data from Nightscout and store in database."""
+    """Fetch CGM data from the configured source and store in database."""
+    if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP:
+        return fetch_from_librelinkup()
+
     conn = create_database()
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     cutoff_ms = int(cutoff.timestamp() * 1000)
@@ -416,7 +841,7 @@ def get_time_in_range(values):
 def analyze_cgm(days=90):
     """Analyze CGM data from database."""
     if not ensure_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
 
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -584,7 +1009,7 @@ def compare_periods(period1_str, period2_str):
     
     # Fetch data for both periods
     if not ensure_data(max(90, (datetime.now(timezone.utc) - start1).days, (datetime.now(timezone.utc) - start2).days)):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     conn = sqlite3.connect(DB_PATH)
     
@@ -761,7 +1186,10 @@ def _identify_regressions(deltas):
 
 
 def get_current_glucose():
-    """Get the most recent glucose reading from Nightscout."""
+    """Get the most recent glucose reading from the configured source."""
+    if DATA_SOURCE == DATA_SOURCE_LIBRELINKUP:
+        return get_current_glucose_librelinkup()
+
     try:
         resp = requests.get(API_BASE, params={"count": 1}, timeout=10)
         resp.raise_for_status()
@@ -1288,7 +1716,7 @@ def query_patterns(days=90, day_of_week=None, hour_start=None, hour_end=None):
         hour_end: End hour (0-23) for time window
     """
     if not ensure_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
 
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -1377,7 +1805,7 @@ def find_patterns(days=90):
     Identifies best/worst times, days, and trends.
     """
     if not ensure_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
 
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -1509,7 +1937,7 @@ def detect_trend_alerts(days=90, min_occurrences=2):
         Dictionary with detected alerts categorized by type
     """
     if not ensure_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -1789,7 +2217,7 @@ def view_day(date_str, hour_start=None, hour_end=None):
     Shows detailed timeline with trends and statistics.
     """
     if not ensure_data(90):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     try:
         target_date = parse_date_arg(date_str)
@@ -1887,7 +2315,7 @@ def find_worst_days(days=21, hour_start=None, hour_end=None, limit=5):
     Ranks days by peak glucose and time out of range.
     """
     if not ensure_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     conn = sqlite3.connect(DB_PATH)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -1966,7 +2394,7 @@ def generate_html_report(days=90, output_path=None):
     """
     # Auto-sync if data is stale (>30 minutes old) before generating report
     if not ensure_fresh_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     conn = sqlite3.connect(DB_PATH)
     
@@ -4964,7 +5392,7 @@ def generate_agp_report(days=14, output_path=None):
     """
     # Auto-sync if data is stale (>30 minutes old) before generating report
     if not ensure_fresh_data(days):
-        return {"error": "Could not fetch data from Nightscout. Check your NIGHTSCOUT_URL."}
+        return {"error": "Could not fetch data. Check your data source configuration."}
     
     conn = sqlite3.connect(DB_PATH)
     

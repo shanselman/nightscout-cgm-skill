@@ -5,7 +5,7 @@ description: Analyze CGM blood glucose data from Nightscout. Use this skill when
 
 # Nightscout CGM Analysis Skill
 
-This skill provides tools for fetching and analyzing Continuous Glucose Monitor (CGM) data from Nightscout.
+This skill provides tools for fetching and analyzing Continuous Glucose Monitor (CGM) data from Nightscout or directly from Abbott FreeStyle Libre 3 via LibreLinkUp.
 
 ## ⚠️ Before Making Changes
 
@@ -55,7 +55,7 @@ Generate a comprehensive, self-contained HTML report with interactive charts:
 - `--output PATH` - Custom output path (default: nightscout_report.html)
 - `--open` - Open report in browser after generating
 
-**Auto-Sync:** Reports automatically sync from Nightscout if local data is more than 30 minutes old.
+**Auto-Sync:** Reports automatically sync from Nightscout or LibreLinkUp if local data is more than 30 minutes old.
 
 **Report Features:**
 - Interactive date controls (7d/14d/30d/90d/6mo/1yr/All + custom date pickers)
@@ -182,7 +182,7 @@ python scripts/cgm.py compare --period1 "this week" --period2 "last week"
 # Get trend alerts (recurring patterns)
 python scripts/cgm.py alerts --days 30
 
-# Refresh data from Nightscout
+# Refresh data from Nightscout or LibreLinkUp
 python scripts/cgm.py refresh
 ```
 

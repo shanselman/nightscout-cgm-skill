@@ -3,7 +3,7 @@
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-Open%20Standard-blue)](https://github.com/agentskills/agentskills)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Continuous Glucose Monitor (CGM) data from [Nightscout](http://www.nightscout.info/). Works with GitHub Copilot CLI, Claude Code, and VS Code agent mode.
+An [Agent Skill](https://github.com/agentskills/agentskills) for analyzing Continuous Glucose Monitor (CGM) data from [Nightscout](http://www.nightscout.info/) or directly from **Abbott FreeStyle Libre 3** via LibreLinkUp. Works with GitHub Copilot CLI, Claude Code, and VS Code agent mode.
 
 ![Nightscout CGM Report with interactive charts](images/newcharts.png)
 
@@ -151,20 +151,21 @@ python scripts/cgm.py chart --heatmap
 **Your glucose data stays on your machine.** Here's how it works:
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                         YOUR MACHINE                                │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────────────────┐  │
-│  │ Copilot CLI │───>│  cgm.py     │───>│ SQLite DB (cgm_data.db) │  │
-│  │ (local)     │    │  (local)    │    │ (local file)            │  │
-│  └─────────────┘    └──────┬──────┘    └─────────────────────────┘  │
-│                            │                                        │
-└────────────────────────────┼────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         YOUR MACHINE                                  │
+│  ┌─────────────┐    ┌─────────────┐    ┌──────────────────────────┐  │
+│  │ Copilot CLI │───>│  cgm.py     │───>│ SQLite DB (cgm_data.db)  │  │
+│  │ (local)     │    │  (local)    │    │ (local file)             │  │
+│  └─────────────┘    └──────┬──────┘    └──────────────────────────┘  │
+│                            │                                          │
+└────────────────────────────┼──────────────────────────────────────────┘
                              │ HTTPS (fetch only)
-                             ▼
-                    ┌─────────────────┐
-                    │ YOUR Nightscout │
-                    │ (your server)   │
-                    └─────────────────┘
+                    ┌────────┴────────┐
+                    ▼                 ▼
+           ┌─────────────────┐  ┌──────────────────┐
+           │ YOUR Nightscout │  │ LibreLinkUp API  │
+           │ (your server)   │  │ (Libre 3 users)  │
+           └─────────────────┘  └──────────────────┘
 ```
 
 **What stays local:**
@@ -188,7 +189,9 @@ The skill simply runs a local Python script and returns text output. Your health
 
 - Python 3.8+
 - `requests` library (`pip install requests`)
-- A [Nightscout](http://www.nightscout.info/) instance with API access
+- **One** of the following data sources:
+  - A [Nightscout](http://www.nightscout.info/) instance with API access (recommended, works with all CGMs)
+  - A **FreeStyle Libre 3** with [LibreLinkUp](https://www.librelinkup.com/) sharing enabled (no Nightscout needed)
 
 ## Installation
 
@@ -218,6 +221,10 @@ pip install requests
 
 ## Configuration
 
+Choose **one** of the two data sources below:
+
+### Option A: Nightscout (Recommended)
+
 Set the `NIGHTSCOUT_URL` environment variable to your Nightscout API endpoint.
 
 > **⚠️ Important:** Before configuring, test your Nightscout URL in a browser to ensure it returns JSON data. If your Nightscout instance requires authentication, you'll need to include your API token as a query parameter:
@@ -240,6 +247,35 @@ $env:NIGHTSCOUT_URL = "https://your-nightscout-site.com/api/v1/entries.json?toke
 ```powershell
 [Environment]::SetEnvironmentVariable("NIGHTSCOUT_URL", "https://your-nightscout-site.com/api/v1/entries.json?token=YOUR_API_SECRET", "User")
 ```
+
+### Option B: FreeStyle Libre 3 (Direct via LibreLinkUp)
+
+If you use an Abbott FreeStyle Libre 3 and don't have a Nightscout server, you can connect directly through LibreLinkUp. You'll need the LibreLinkUp app set up with sharing enabled.
+
+**Linux/macOS:**
+```bash
+export LIBRELINKUP_EMAIL="your-email@example.com"
+export LIBRELINKUP_PASSWORD="your-librelinkup-password"
+export LIBRELINKUP_REGION="US"  # US, EU, DE, FR, JP, AP, or AU
+```
+
+**Windows PowerShell:**
+```powershell
+$env:LIBRELINKUP_EMAIL = "your-email@example.com"
+$env:LIBRELINKUP_PASSWORD = "your-librelinkup-password"
+$env:LIBRELINKUP_REGION = "US"
+```
+
+**Optional** - Customize glucose thresholds (defaults match clinical standards):
+```bash
+export CGM_UNITS="mg/dl"       # or "mmol" for mmol/L
+export CGM_URGENT_LOW=55       # Urgent low threshold
+export CGM_TARGET_LOW=70       # Target range lower bound
+export CGM_TARGET_HIGH=180     # Target range upper bound
+export CGM_URGENT_HIGH=250     # Urgent high threshold
+```
+
+> **Note:** The LibreLinkUp API is unofficial and maintained by the open-source community. It returns ~12 hours of data per sync (vs. months from Nightscout), so the skill syncs more frequently. Pump/insulin data is not available via LibreLinkUp. If you have both Nightscout and LibreLinkUp configured, Nightscout takes priority.
 
 ## Getting Started
 
