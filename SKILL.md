@@ -1,6 +1,17 @@
 ---
 name: nightscout-cgm
-description: Analyze CGM blood glucose data from Nightscout. Use this skill when asked about current glucose levels, blood sugar trends, A1C estimates, time-in-range statistics, glucose variability, or diabetes management insights.
+description: "Analyze CGM blood glucose data from Nightscout. Use this skill when asked about current glucose levels, blood sugar trends, A1C estimates, time-in-range statistics, glucose variability, pump/loop status (IOB, COB), or diabetes management insights."
+user-invocable: true
+triggers:
+  - what's my current glucose
+  - analyze my blood sugar
+  - nightscout data
+  - CGM analysis
+  - time in range
+  - glucose trends
+  - A1C estimate
+  - blood glucose report
+  - what's my IOB
 ---
 
 # Nightscout CGM Analysis Skill
