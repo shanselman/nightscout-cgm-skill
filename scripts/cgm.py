@@ -5855,6 +5855,92 @@ def get_treatments(hours=24, event_types=None, limit=20):
         return {"error": f"Failed to fetch treatments: {e}"}
 
 
+def _parse_treatment_timestamp(timestamp):
+    """Parse Nightscout treatment timestamp into UTC datetime."""
+    if not timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
+
+
+def _build_change_age_metric(treatments, event_type):
+    """Build CAGE/SAGE/IAGE style metric for one treatment event type."""
+    timestamps = []
+    for treatment in treatments:
+        dt = _parse_treatment_timestamp(treatment.get("created_at"))
+        if dt:
+            timestamps.append(dt)
+
+    timestamps.sort(reverse=True)
+    if not timestamps:
+        return {
+            "event_type": event_type,
+            "last_change": None,
+            "age_hours": None,
+            "age_days": None,
+            "average_interval_days": None,
+            "changes_observed": 0
+        }
+
+    now = datetime.now(timezone.utc)
+    age_hours = (now - timestamps[0]).total_seconds() / 3600
+    average_interval_days = None
+    if len(timestamps) > 1:
+        intervals_hours = [
+            (timestamps[i] - timestamps[i + 1]).total_seconds() / 3600
+            for i in range(len(timestamps) - 1)
+        ]
+        average_interval_days = round((sum(intervals_hours) / len(intervals_hours)) / 24, 2)
+
+    return {
+        "event_type": event_type,
+        "last_change": timestamps[0].isoformat(),
+        "age_hours": round(age_hours, 1),
+        "age_days": round(age_hours / 24, 2),
+        "average_interval_days": average_interval_days,
+        "changes_observed": len(timestamps)
+    }
+
+
+def get_change_ages(limit=100):
+    """Get CAGE/SAGE/IAGE metrics from Nightscout treatments."""
+    caps = detect_pump_capabilities()
+    if not caps.get("has_treatments"):
+        return {
+            "error": "No treatment data available",
+            "message": "This Nightscout instance doesn't appear to have treatment data. "
+                      "CAGE/SAGE/IAGE requires treatment entries uploading to Nightscout.",
+            "cgm_only": True
+        }
+
+    metric_types = {
+        "cage": "Site Change",
+        "sage": "Sensor Change",
+        "iage": "Insulin Change",
+    }
+
+    try:
+        result = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "metrics": {}
+        }
+        for key, event_type in metric_types.items():
+            resp = requests.get(
+                f"{API_ROOT}/treatments.json",
+                params={"count": limit, "find[eventType]": event_type},
+                timeout=15
+            )
+            resp.raise_for_status()
+            treatments = resp.json() or []
+            result["metrics"][key] = _build_change_age_metric(treatments, event_type)
+
+        return result
+    except requests.RequestException as e:
+        return {"error": f"Failed to fetch change ages: {e}"}
+
+
 def get_profile():
     """Get pump profile settings (basal rates, ISF, carb ratios, targets)."""
     # Check if profile data is available
@@ -6203,6 +6289,15 @@ def main():
         help="Number of hours to look back (default: 24)"
     )
 
+    # CAGE/SAGE/IAGE command
+    ages_parser = subparsers.add_parser(
+        "ages", help="Get CAGE/SAGE/IAGE from treatment events"
+    )
+    ages_parser.add_argument(
+        "--count", type=int, default=100,
+        help="Number of events to fetch per change type (default: 100)"
+    )
+
     # Profile command
     subparsers.add_parser(
         "profile", help="Get pump profile settings (basal rates, ISF, carb ratios)"
@@ -6297,6 +6392,8 @@ def main():
         result = get_pump_status()
     elif args.command == "treatments":
         result = get_treatments(hours=args.hours)
+    elif args.command == "ages":
+        result = get_change_ages(limit=args.count)
     elif args.command == "profile":
         result = get_profile()
     else:

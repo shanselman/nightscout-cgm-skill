@@ -44,6 +44,7 @@ Where `<skill-path>` is the location where this skill is installed (e.g., `~/.co
 | `chart [options]` | Terminal visualizations (heatmap, sparkline, day chart) |
 | `pump` | Get current pump status (IOB, COB, predicted glucose) * |
 | `treatments [--hours N]` | Get recent treatments (boluses, temp basals, carbs) * |
+| `ages [--count N]` | Get CAGE/SAGE/IAGE from Site/Sensor/Insulin Change events * |
 | `profile` | Get pump profile settings (basal rates, ISF, carb ratios) * |
 
 \* **Pump commands require Loop, OpenAPS, or similar closed-loop system.** The skill auto-detects pump capabilities on first use. CGM-only users won't see errors—commands simply report that pump data isn't available.
@@ -120,6 +121,12 @@ These commands require a closed-loop system (Loop, OpenAPS, AndroidAPS, etc.) up
 - Temp basals
 - Carb entries
 - Summary totals (total insulin, total carbs)
+
+**`ages [--count N]`** - Get CAGE/SAGE/IAGE:
+- CAGE: time since last `Site Change`
+- SAGE: time since last `Sensor Change`
+- IAGE: time since last `Insulin Change`
+- Average interval (days) and observed change count per type
 
 **`profile`** - Get pump profile settings:
 - Basal rates by time of day

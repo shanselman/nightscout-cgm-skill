@@ -374,6 +374,67 @@ class TestGetTreatments:
         assert "find[created_at][$gte]" in str(call_args)
 
 
+class TestGetChangeAges:
+    """Tests for get_change_ages() function."""
+
+    def test_get_change_ages_success(self, cgm_module, mock_capabilities_with_pump):
+        """Should return CAGE/SAGE/IAGE with age and average interval values."""
+        cgm_module._pump_capabilities = mock_capabilities_with_pump
+        now = datetime.now(timezone.utc)
+
+        def _mk(hours_ago):
+            return {"created_at": (now - timedelta(hours=hours_ago)).isoformat().replace("+00:00", "Z")}
+
+        responses = {
+            "Site Change": [_mk(48), _mk(120)],
+            "Sensor Change": [_mk(240), _mk(480)],
+            "Insulin Change": [_mk(36), _mk(84)],
+        }
+
+        def mock_get(url, params=None, **kwargs):
+            mock_resp = MagicMock()
+            mock_resp.raise_for_status = MagicMock()
+            mock_resp.json.return_value = responses[params["find[eventType]"]]
+            return mock_resp
+
+        with patch("requests.get", side_effect=mock_get):
+            result = cgm_module.get_change_ages(limit=25)
+
+        assert "error" not in result
+        assert result["metrics"]["cage"]["event_type"] == "Site Change"
+        assert result["metrics"]["sage"]["event_type"] == "Sensor Change"
+        assert result["metrics"]["iage"]["event_type"] == "Insulin Change"
+        assert result["metrics"]["cage"]["age_days"] >= 1.9
+        assert result["metrics"]["cage"]["age_days"] <= 2.1
+        assert result["metrics"]["cage"]["average_interval_days"] == 3.0
+        assert result["metrics"]["cage"]["changes_observed"] == 2
+
+    def test_get_change_ages_missing_event_data(self, cgm_module, mock_capabilities_with_pump):
+        """Should handle event types with no treatment history."""
+        cgm_module._pump_capabilities = mock_capabilities_with_pump
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = []
+
+        with patch("requests.get", return_value=mock_resp):
+            result = cgm_module.get_change_ages()
+
+        assert "error" not in result
+        assert result["metrics"]["cage"]["last_change"] is None
+        assert result["metrics"]["sage"]["average_interval_days"] is None
+        assert result["metrics"]["iage"]["changes_observed"] == 0
+
+    def test_get_change_ages_cgm_only(self, cgm_module, mock_capabilities_cgm_only):
+        """Should return helpful error for CGM-only users."""
+        cgm_module._pump_capabilities = mock_capabilities_cgm_only
+
+        result = cgm_module.get_change_ages()
+
+        assert "error" in result
+        assert result["cgm_only"] is True
+
+
 # =============================================================================
 # PROFILE TESTS
 # =============================================================================
@@ -500,6 +561,18 @@ class TestPumpCLI:
                     except SystemExit:
                         pass
                     mock_func.assert_called_once_with(hours=6)
+
+    def test_ages_command_with_count(self, cgm_module):
+        """'ages --count N' should pass count parameter."""
+        with patch.object(cgm_module, "get_change_ages") as mock_func:
+            mock_func.return_value = {"metrics": {}}
+            with patch.object(sys, "argv", ["cgm.py", "ages", "--count", "25"]):
+                with patch("builtins.print"):
+                    try:
+                        cgm_module.main()
+                    except SystemExit:
+                        pass
+                    mock_func.assert_called_once_with(limit=25)
 
     def test_profile_command(self, cgm_module):
         """'profile' command should call get_profile."""
